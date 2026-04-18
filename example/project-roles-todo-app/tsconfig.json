@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "types": ["./worker-configuration", "vite/client", "node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "baseUrl": ".",
+    "paths": {
+      "cf-sync-kit": ["../../src/index.ts"],
+      "cf-sync-kit/server": ["../../src/server.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "shared/**/*.ts", "../../src/**/*.ts", "../../src/**/*.tsx"]
+}

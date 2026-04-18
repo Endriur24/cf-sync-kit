@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-sync-kit-bulk-todo",
+  "compatibility_date": "2026-03-29",
+  "main": "./src/server/index.tsx",
+  "assets": {
+    "directory": "dist/client"
+  },
+  "migrations": [
+    // {
+    //   "tag": "v2", // Migration identifier. This should be unique for each migration entry
+    //   "deleted_classes": [ // Array of deleted class names
+    //     "MyDurableObject"
+    //   ]
+    // },
+    {
+      "new_sqlite_classes": [
+        "ProjectRoom"
+      ],
+      "tag": "v3"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "ProjectRoom",
+        "name": "PROJECT_ROOM"
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bulk-todo-db",
+      "database_id": "781756f0-f022-4e45-b3f4-5221216919b8"
+    }
+  ]
+}

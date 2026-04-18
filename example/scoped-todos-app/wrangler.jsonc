@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "scoped-todos-demo",
+  "compatibility_date": "2026-03-29",
+  "main": "./src/server/index.tsx",
+  "assets": { "directory": "dist/client" },
+  "migrations": [
+    { "new_sqlite_classes": ["ProjectRoom"], "tag": "v1" },
+    { "new_classes": ["lists"], "tag": "v2" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "ProjectRoom", "name": "PROJECT_ROOM" }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "scoped-todos-db",
+      "database_id": "scoped-todos-db-local"
+    }
+  ]
+}
