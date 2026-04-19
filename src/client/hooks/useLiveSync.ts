@@ -11,6 +11,7 @@ import { log } from "../../shared/logger"
 
 /**
  * Configuration options for useLiveSync.
+ * Extends PartySocket options for full WebSocket configurability.
  */
 export interface UseLiveSyncOptions {
   /** Optional scope for filtering broadcasts */
@@ -26,6 +27,48 @@ export interface UseLiveSyncOptions {
    * Can be a static object or a function that returns params for each connection.
    */
   query?: Record<string, string> | (() => Record<string, string>)
+  /**
+   * Custom base path for the WebSocket connection (defaults to "/parties").
+   * Allows mounting the PartyKit endpoint on a different path.
+   */
+  path?: string
+  /**
+   * Custom host for the WebSocket connection.
+   * Useful for connecting to a different server or custom domain.
+   */
+  host?: string
+  /**
+   * WebSocket protocol to use ("ws" or "wss").
+   */
+  protocol?: 'ws' | 'wss'
+  /**
+   * Maximum delay in ms between reconnection attempts (default: 10000).
+   */
+  maxReconnectionDelay?: number
+  /**
+   * Minimum delay in ms between reconnection attempts.
+   */
+  minReconnectionDelay?: number
+  /**
+   * How fast the reconnection delay grows (default: 1.3).
+   */
+  reconnectionDelayGrowFactor?: number
+  /**
+   * Minimum time in ms to consider connection as stable (default: 5000).
+   */
+  minUptime?: number
+  /**
+   * Retry connect if not connected after this time, in ms (default: 4000).
+   */
+  connectionTimeout?: number
+  /**
+   * Maximum number of reconnection retries (default: Infinity).
+   */
+  maxRetries?: number
+  /**
+   * Maximum number of messages to buffer until reconnection (default: Infinity).
+   */
+  maxEnqueuedMessages?: number
 }
 
 /**
@@ -63,7 +106,7 @@ export function useLiveSync(
     ? { scope: optionsOrScope }
     : optionsOrScope ?? {}
 
-  const { scope, party = 'main', debug = false, onError, query } = options
+  const { scope, party = 'main', debug = false, onError, query, ...partySocketOptions } = options
 
   const getQuery = useCallback((): Record<string, string> => {
     if (typeof query === 'function') {
@@ -189,6 +232,9 @@ export function useLiveSync(
     // Pass function reference so query params are re-evaluated on each reconnect
     // This enables token rotation without requiring a full component remount
     query: getQuery,
+
+    // Pass all PartySocket options (path, host, protocol, reconnection settings, etc.)
+    ...partySocketOptions,
 
     onOpen: () => {
       debugLog('Connected')
