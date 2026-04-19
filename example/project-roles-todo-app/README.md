@@ -29,6 +29,14 @@ npm run db:setup:local
 
 This generates migrations from the schema and applies them locally. Run this again if you modify `shared/schema.ts`.
 
+Before running the dev server, generate TypeScript types for Cloudflare bindings:
+
+```bash
+npm run cf-typegen
+```
+
+To use `db:studio`, update the database URL in `drizzle.config.ts` first.
+
 ## Running
 
 From the project root:
