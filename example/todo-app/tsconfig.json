@@ -9,7 +9,6 @@
     "types": ["./worker-configuration", "vite/client", "node"],
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "baseUrl": ".",
     "paths": {
       "cf-sync-kit": ["../../src/index.ts"],
       "cf-sync-kit/server": ["../../src/server.ts"]
