@@ -15,6 +15,20 @@ A real-time synchronization framework for Cloudflare Workers with Durable Object
 - **Runtime validation** for mutually exclusive config options
 - **Debug mode** for development
 
+## Quick Start (Standalone)
+
+For the fastest way to get started, clone the standalone todo example that uses `cf-sync-kit` installed from npm:
+
+```bash
+git clone https://github.com/Endriur24/cf-sync-kit-todo-example.git
+cd cf-sync-kit-todo-example
+npm install
+npm run db:setup:local
+npm run dev
+```
+
+This is a self-contained starter project demonstrating CRUD, live sync, connection status, and multiple collections with `singleTenant: true`.
+
 ## Try the Examples
 
 Clone the repository and run one of the included example apps to see cf-sync-kit in action:
