@@ -28,3 +28,4 @@ export type { CustomAccess } from './server/types'
 
 // Config Helpers
 export { defineCollections, DEFAULT_SYNC_ID } from './shared/types'
+export type { CollectionsMap } from './shared/types'

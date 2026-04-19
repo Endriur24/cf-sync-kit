@@ -1,15 +1,15 @@
 import { eq, and, inArray } from 'drizzle-orm'
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1'
-import type { SQLiteTable } from 'drizzle-orm/sqlite-core'
+import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { Column } from 'drizzle-orm'
 
-type TableWithId = SQLiteTable & { id: Column<any, any, any> }
+type TableWithId = AnySQLiteTable & { id: Column<any, any, any> }
 
 /**
  * Safely accesses a table column by name.
  * Drizzle tables are dynamic objects — this helper avoids scattered `as any` casts.
  */
-function getTableColumn(table: SQLiteTable, columnName: string): Column {
+function getTableColumn(table: AnySQLiteTable, columnName: string): Column {
   return (table as unknown as Record<string, Column>)[columnName]
 }
 
@@ -20,7 +20,7 @@ function getTableColumn(table: SQLiteTable, columnName: string): Column {
  */
 type DynamicInsertValue = Record<string, unknown>
 
-export class Repository<TTable extends TableWithId> {
+export class Repository<TTable extends AnySQLiteTable> {
   protected db: DrizzleD1Database
   public readonly syncIdColumn: string
   public readonly singleTenant: boolean
@@ -82,8 +82,8 @@ export class Repository<TTable extends TableWithId> {
    */
   async findById(syncId: string, id: string) {
     const whereClause = this.singleTenant
-      ? eq(this.table.id, id)
-      : and(eq(this.table.id, id), this.whereSyncId(syncId))
+      ? eq(getTableColumn(this.table, 'id'), id)
+      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
 
     try {
       const results = await this.db
@@ -135,8 +135,8 @@ export class Repository<TTable extends TableWithId> {
     }
 
     const whereClause = this.singleTenant
-      ? eq(this.table.id, id)
-      : and(eq(this.table.id, id), this.whereSyncId(syncId))
+      ? eq(getTableColumn(this.table, 'id'), id)
+      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
 
     try {
       const results = await this.db
@@ -157,8 +157,8 @@ export class Repository<TTable extends TableWithId> {
    */
   async delete(syncId: string, id: string) {
     const whereClause = this.singleTenant
-      ? eq(this.table.id, id)
-      : and(eq(this.table.id, id), this.whereSyncId(syncId))
+      ? eq(getTableColumn(this.table, 'id'), id)
+      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
 
     try {
       await this.db
@@ -240,8 +240,8 @@ export class Repository<TTable extends TableWithId> {
           }
 
           const whereClause = this.singleTenant
-            ? eq(this.table.id, id)
-            : and(eq(this.table.id, id), this.whereSyncId(syncId))
+            ? eq(getTableColumn(this.table, 'id'), id)
+            : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
 
           return this.db
             .update(this.table)
@@ -278,8 +278,8 @@ export class Repository<TTable extends TableWithId> {
       const batch = ids.slice(i, i + batchSize)
       try {
         const whereClause = this.singleTenant
-          ? inArray(this.table.id, batch)
-          : and(this.whereSyncId(syncId), inArray(this.table.id, batch))
+          ? inArray(getTableColumn(this.table, 'id'), batch)
+          : and(this.whereSyncId(syncId), inArray(getTableColumn(this.table, 'id'), batch))
 
         await this.db
           .delete(this.table)
@@ -298,8 +298,8 @@ export class Repository<TTable extends TableWithId> {
     if (ids.length === 0) return []
 
     const whereClause = this.singleTenant
-      ? inArray(this.table.id, ids)
-      : and(this.whereSyncId(syncId), inArray(this.table.id, ids))
+      ? inArray(getTableColumn(this.table, 'id'), ids)
+      : and(this.whereSyncId(syncId), inArray(getTableColumn(this.table, 'id'), ids))
 
     try {
       const results = await this.db

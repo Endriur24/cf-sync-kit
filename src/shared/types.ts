@@ -1,5 +1,4 @@
 import type { z } from 'zod'
-import type { SQLiteTable } from 'drizzle-orm/sqlite-core'
 
 /**
  * Default sync ID used for single-tenant apps where no explicit syncId is provided.
@@ -13,13 +12,14 @@ export type ActionType = 'insert' | 'update' | 'delete' | 'bulk-insert' | 'bulk-
 
 /**
  * Configuration for a collection, defining the Drizzle table and Zod schemas.
+ * @template TTable - Drizzle table type
  * @template TInsert - Type inferred from insert schema
  * @template TUpdate - Type inferred from update schema
  * @template TEntity - Type inferred from select schema
  */
-export type CollectionConfig<TInsert = any, TUpdate = any, TEntity = any> = {
+export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity = any> = {
   /** Drizzle ORM table definition */
-  table: SQLiteTable
+  table: TTable
   /** Zod schema for validating insert operations */
   insertSchema: z.ZodType<TInsert>
   /** Zod schema for validating update operations */
@@ -39,7 +39,15 @@ export type CollectionConfig<TInsert = any, TUpdate = any, TEntity = any> = {
  * Map of collection names to their configurations.
  * Used as the primary type parameter for type-safe hooks.
  */
-export type CollectionsMap = Record<string, CollectionConfig>
+export type CollectionsMap = Record<string, {
+  table: any
+  insertSchema: z.ZodType<any>
+  updateSchema: z.ZodType<any>
+  selectSchema: z.ZodType<any>
+  syncIdColumn?: string
+  singleTenant?: boolean
+  autoTimestamp?: boolean
+}>
 
 /**
  * Infers the insert type for a specific collection.

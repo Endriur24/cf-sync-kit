@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
-import type { SQLiteTable } from 'drizzle-orm/sqlite-core'
+import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import { isDev } from '../shared/logger'
 import { DEFAULT_SYNC_ID } from '../shared/types'
 
@@ -109,7 +109,7 @@ export interface CollectionRouterOptions {
  */
 export function createCollectionRouter(
   collection: string,
-  table: SQLiteTable,
+  table: AnySQLiteTable,
   insertSchema: z.ZodType,
   updateSchema: z.ZodType,
   getRoom: GetRoomFn,

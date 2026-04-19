@@ -1,5 +1,6 @@
 import { DurableObjectBase } from './DurableObjectBase'
 import { Repository } from './Repository'
+import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { CollectionsMap } from '../shared/types'
 import type { Middleware } from './MiddlewareSystem'
 import { requireAuth, requireOwner, createSyncAccessMiddleware, createDefaultSyncAccessValidator } from './middleware'
@@ -93,9 +94,9 @@ export function createDurableObject<TConfig extends CollectionsMap>(
           )
         }
         this.registerRepository(
-          new Repository(
+          new Repository<AnySQLiteTable>(
             env[dbName as keyof typeof env] as D1Database,
-            config.table as any,
+            config.table,
             name,
             config.syncIdColumn ?? 'syncId',
             singleTenant,
