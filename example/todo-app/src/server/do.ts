@@ -3,6 +3,7 @@ import { collectionsConfig } from '../../shared/schema'
 
 export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, {
   className: 'ProjectRoom',
+  dbName: 'TODOS_DB',
 })
 
 export function getRoom(env: Bindings) {

@@ -67,9 +67,10 @@ export interface CreateDurableObjectResult<TConfig extends CollectionsMap> {
  */
 export function createDurableObject<TConfig extends CollectionsMap>(
   collectionsConfig: TConfig,
-  options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset }
+  options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset; dbName?: string }
 ): CreateDurableObjectResult<TConfig> {
   const className = options?.className ?? 'SyncRoom'
+  const dbName = options?.dbName ?? 'DB'
 
   const presetMiddleware: Middleware[] = []
   if (options?.preset === 'per-user') {
@@ -93,7 +94,7 @@ export function createDurableObject<TConfig extends CollectionsMap>(
         }
         this.registerRepository(
           new Repository(
-            env.DB,
+            env[dbName as keyof typeof env] as D1Database,
             config.table as any,
             name,
             config.syncIdColumn ?? 'syncId',

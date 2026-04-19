@@ -7,7 +7,7 @@ import { getRoom } from '../do'
 const completeAll = new Hono<{ Bindings: Bindings }>()
   .post('/', async (c) => {
     try {
-      const db = drizzle(c.env.DB)
+      const db = drizzle(c.env.TODOS_DB)
 
       const updatedTodos = await db.update(todosTable)
         .set({ completed: true, updatedAt: new Date() })

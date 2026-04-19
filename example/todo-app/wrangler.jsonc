@@ -30,7 +30,7 @@
   },
   "d1_databases": [
     {
-      "binding": "DB",
+      "binding": "TODOS_DB",
       "database_name": "do-todos-db",
       "database_id": "781756f0-f022-4e45-b3f4-5221216919b8"
     }

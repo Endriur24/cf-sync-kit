@@ -7,7 +7,7 @@ declare namespace Cloudflare {
 		durableNamespaces: "ProjectRoom";
 	}
 	interface Env {
-		DB: D1Database;
+		TODOS_DB: D1Database;
 		PROJECT_ROOM: DurableObjectNamespace<import("../example/todo-app/src/server/index").ProjectRoom>;
 	}
 }

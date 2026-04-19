@@ -22,7 +22,9 @@ const app = new Hono<{ Bindings: Bindings }>()
 
   .route("/api/complete-all", completeAll)
 
-  const syncApi = createSyncApi(collectionsConfig, getRoom);
+  const syncApi = createSyncApi(collectionsConfig, getRoom, {
+    dbName: 'TODOS_DB',
+  });
   app.route("/api", syncApi)
 
   .use(renderer)

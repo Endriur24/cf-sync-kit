@@ -88,6 +88,11 @@ export interface CollectionRouterOptions {
    * @default false
    */
   singleTenant?: boolean
+  /**
+   * Name of the D1 database binding to use (default: "DB").
+   * Use this if your wrangler config uses a different binding name.
+   */
+  dbName?: string
 }
 
 /**
@@ -115,6 +120,7 @@ export function createCollectionRouter(
   const validateSyncAccess = options?.validateSyncAccess
   const syncIdColumn = options?.syncIdColumn ?? 'syncId'
   const singleTenant = options?.singleTenant ?? false
+  const dbName = options?.dbName ?? 'DB'
 
   const resolveSyncId = (syncId: string | undefined) => singleTenant ? (syncId ?? DEFAULT_SYNC_ID) : syncId!
 
@@ -175,7 +181,7 @@ export function createCollectionRouter(
     }
 
     try {
-      const db = drizzle(c.env.DB)
+      const db = drizzle(c.env[dbName as keyof typeof c.env] as D1Database)
       if (singleTenant) {
         const results = await db.select().from(table)
         return c.json({ [collection]: results })

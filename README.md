@@ -205,6 +205,32 @@ export function getRoom(env: Bindings, syncId: string) {
 >
 > **Do NOT use this preset** if you need shared scopes (projects, teams). Use custom middleware instead.
 
+#### Custom Database Binding Name
+
+By default, the framework expects your D1 database binding to be named `DB`. If your `wrangler.jsonc` uses a different binding name, specify it via `dbName`:
+
+```ts
+// wrangler.jsonc
+{
+  "d1_databases": [
+    { "binding": "TODOS_DB", "database_name": "my-db", "database_id": "..." }
+  ]
+}
+
+// server/do.ts
+export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, {
+  className: 'ProjectRoom',
+  dbName: 'TODOS_DB'  // ← custom binding name
+})
+
+// server/api.ts
+const syncApi = createSyncApi(collectionsConfig, getRoom, {
+  dbName: 'TODOS_DB'  // ← also pass it to the router
+})
+```
+
+> **See:** `example/todo-app` for a working example with a custom `TODOS_DB` binding name.
+
 Need custom middleware? Extend manually:
 
 ```ts
@@ -565,7 +591,7 @@ interface UseLiveSyncOptions {
 | `Middleware` | Middleware function type |
 | `RoomMutator` | Interface for DO room mutation methods |
 | `GetRoomFn` | Type for room resolver function |
-| `CollectionRouterOptions` | Options for createCollectionRouter / createSyncApi |
+| `CollectionRouterOptions` | Options for createCollectionRouter / createSyncApi (includes `dbName` for custom D1 binding) |
 
 ### Shared Types
 
