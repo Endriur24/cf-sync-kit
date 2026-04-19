@@ -1,6 +1,6 @@
 {
   "name": "cf-sync-kit",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "A real-time framework for Cloudflare Workers with Durable Objects, Hono, and React",
   "type": "module",
   "main": "./dist/index.js",
@@ -56,10 +56,7 @@
   "peerDependenciesMeta": {
     "react": { "optional": true },
     "react-dom": { "optional": true },
-    "hono": { "optional": true },
-    "drizzle-orm": { "optional": true },
-    "drizzle-zod": { "optional": true },
-    "partyserver": { "optional": true }
+    "drizzle-zod": { "optional": true }
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.30.3",
