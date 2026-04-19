@@ -160,7 +160,7 @@ export class Repository<TTable extends AnySQLiteTable> {
     const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
     try {
       if (this.softDeleteColumn) {
-        let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date() } as any)
+        let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
         if (whereClause) query = query.where(whereClause) as any
         await query
       } else {
@@ -280,7 +280,7 @@ export class Repository<TTable extends AnySQLiteTable> {
         const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), batch))
 
         if (this.softDeleteColumn) {
-          let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date() } as any)
+          let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
           if (whereClause) query = query.where(whereClause) as any
           await query
         } else {
