@@ -192,6 +192,51 @@ export const collectionsConfig = defineCollections({
 })
 ```
 
+#### Soft Delete
+
+Enable soft-delete to preserve records in the database while hiding them from the application. When enabled, `delete` and `bulk-delete` operations perform an `UPDATE` that sets a timestamp column instead of physically removing rows. The client still receives `action: 'delete'` broadcast events — no frontend changes needed.
+
+```ts
+// 1. Add a timestamp column to your schema
+export const todosTable = sqliteTable('todos', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),  // ← nullable soft-delete column
+})
+
+// 2. Enable soft-delete in collection config
+export const collectionsConfig = defineCollections({
+  todos: {
+    table: todosTable,
+    insertSchema: createInsertSchema(todosTable).omit({ id: true, createdAt: true, updatedAt: true }),
+    updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
+    selectSchema: createSelectSchema(todosTable),
+    softDeleteColumn: true,  // ← uses "deletedAt" as the default column name
+  },
+})
+```
+
+**How it works:**
+
+| Operation | Without soft-delete | With soft-delete |
+|-----------|--------------------|------------------|
+| `delete` | `DELETE FROM table` | `UPDATE table SET deletedAt = NOW()` |
+| `bulk-delete` | `DELETE FROM table WHERE id IN (...)` | `UPDATE table SET deletedAt = NOW() WHERE id IN (...)` |
+| `findAll` / `findById` / `GET` | Returns all rows | Filters `WHERE deletedAt IS NULL` |
+| Client broadcast | `action: 'delete'` | `action: 'delete'` (unchanged) |
+
+**Configuration options:**
+
+```ts
+// Use default column name "deletedAt"
+softDeleteColumn: true
+
+// Use a custom column name
+softDeleteColumn: 'archived_at'
+```
+
+> **Note:** Soft-deleted records are automatically excluded from all read operations (`findAll`, `findById`, `findByIds`, and the `GET /:syncId` REST endpoint). The client UI receives standard `delete` events and removes items from cache — no code changes required on the frontend.
+
 ### 2. Create your Durable Object
 
 ```ts

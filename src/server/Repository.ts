@@ -1,4 +1,4 @@
-import { eq, and, inArray } from 'drizzle-orm'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { Column } from 'drizzle-orm'
@@ -25,6 +25,7 @@ export class Repository<TTable extends AnySQLiteTable> {
   public readonly syncIdColumn: string
   public readonly singleTenant: boolean
   public readonly autoTimestamp: boolean
+  public readonly softDeleteColumn: string | null
 
   /**
    * @param d1 - Cloudflare D1 database binding
@@ -33,6 +34,7 @@ export class Repository<TTable extends AnySQLiteTable> {
    * @param syncIdColumn - Name of the column used as sync/tenant ID (default: "syncId")
    * @param singleTenant - When true, syncIdColumn is ignored and data is not scoped
    * @param autoTimestamp - When true, automatically sets createdAt/updatedAt timestamps (default: true)
+   * @param softDeleteColumn - Name of the column for soft-delete or `true` to use "deletedAt"
    */
   constructor(
     d1: D1Database,
@@ -40,17 +42,30 @@ export class Repository<TTable extends AnySQLiteTable> {
     public collectionName: string,
     syncIdColumn = 'syncId',
     singleTenant = false,
-    autoTimestamp = true
+    autoTimestamp = true,
+    softDeleteColumn?: string | boolean
   ) {
     this.db = drizzle(d1)
     this.syncIdColumn = syncIdColumn
     this.singleTenant = singleTenant
     this.autoTimestamp = autoTimestamp
+    this.softDeleteColumn = typeof softDeleteColumn === 'string' ? softDeleteColumn : (softDeleteColumn ? 'deletedAt' : null)
   }
 
   private whereSyncId(syncId: string) {
     if (this.singleTenant) return undefined
     return eq(getTableColumn(this.table, this.syncIdColumn), syncId)
+  }
+
+  private buildWhere(syncId: string, additionalCondition?: any) {
+    const conditions = []
+    if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
+    if (additionalCondition) conditions.push(additionalCondition)
+    if (this.softDeleteColumn) conditions.push(isNull(getTableColumn(this.table, this.softDeleteColumn)))
+
+    if (conditions.length === 0) return undefined
+    if (conditions.length === 1) return conditions[0]
+    return and(...conditions)
   }
 
   /**
@@ -81,16 +96,12 @@ export class Repository<TTable extends AnySQLiteTable> {
    * Finds a single entity by id, scoped to syncId.
    */
   async findById(syncId: string, id: string) {
-    const whereClause = this.singleTenant
-      ? eq(getTableColumn(this.table, 'id'), id)
-      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
+    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
 
     try {
-      const results = await this.db
-        .select()
-        .from(this.table)
-        .where(whereClause)
-
+      let query = this.db.select().from(this.table)
+      if (whereClause) query = query.where(whereClause) as any
+      const results = await query
       return results[0] || null
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -102,21 +113,16 @@ export class Repository<TTable extends AnySQLiteTable> {
    * Finds all entities for a sync scope.
    */
   async findAll(syncId: string) {
-    if (this.singleTenant) {
-      try {
-        const results = await this.db.select().from(this.table)
-        return results || []
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`[Repository.findAll] Failed to find entities in ${this.collectionName}: ${message}`)
-      }
-    }
     try {
-      const results = await this.db
-        .select()
-        .from(this.table)
-        .where(this.whereSyncId(syncId))
+      const conditions = []
+      if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
+      if (this.softDeleteColumn) conditions.push(isNull(getTableColumn(this.table, this.softDeleteColumn)))
 
+      let query = this.db.select().from(this.table)
+      if (conditions.length === 1) query = query.where(conditions[0]) as any
+      else if (conditions.length > 1) query = query.where(and(...conditions)) as any
+
+      const results = await query
       return results || []
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -133,18 +139,13 @@ export class Repository<TTable extends AnySQLiteTable> {
       ...data,
       ...(this.autoTimestamp ? { updatedAt: new Date() } : {}),
     }
-
-    const whereClause = this.singleTenant
-      ? eq(getTableColumn(this.table, 'id'), id)
-      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
+    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
 
     try {
-      const results = await this.db
-        .update(this.table)
-        .set(updateData)
-        .where(whereClause)
-        .returning()
+      let query = this.db.update(this.table).set(updateData)
+      if (whereClause) query = query.where(whereClause) as any
 
+      const results = await query.returning()
       return results[0] || null
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -156,14 +157,17 @@ export class Repository<TTable extends AnySQLiteTable> {
    * Deletes an entity by id, scoped to syncId (unless singleTenant mode).
    */
   async delete(syncId: string, id: string) {
-    const whereClause = this.singleTenant
-      ? eq(getTableColumn(this.table, 'id'), id)
-      : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
-
+    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
     try {
-      await this.db
-        .delete(this.table)
-        .where(whereClause)
+      if (this.softDeleteColumn) {
+        let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date() } as any)
+        if (whereClause) query = query.where(whereClause) as any
+        await query
+      } else {
+        let query = this.db.delete(this.table)
+        if (whereClause) query = query.where(whereClause) as any
+        await query
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[Repository.delete] Failed to delete entity in ${this.collectionName}: ${message}`)
@@ -239,15 +243,11 @@ export class Repository<TTable extends AnySQLiteTable> {
             ...(this.autoTimestamp ? { updatedAt: now } : {}),
           }
 
-          const whereClause = this.singleTenant
-            ? eq(getTableColumn(this.table, 'id'), id)
-            : and(eq(getTableColumn(this.table, 'id'), id), this.whereSyncId(syncId))
+          const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
 
-          return this.db
-            .update(this.table)
-            .set(updateData)
-            .where(whereClause)
-            .returning()
+          let query = this.db.update(this.table).set(updateData)
+          if (whereClause) query = query.where(whereClause) as any
+          return query.returning()
         })
 
         // Execute all updates in a single batch request
@@ -277,13 +277,17 @@ export class Repository<TTable extends AnySQLiteTable> {
     for (let i = 0; i < ids.length; i += batchSize) {
       const batch = ids.slice(i, i + batchSize)
       try {
-        const whereClause = this.singleTenant
-          ? inArray(getTableColumn(this.table, 'id'), batch)
-          : and(this.whereSyncId(syncId), inArray(getTableColumn(this.table, 'id'), batch))
+        const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), batch))
 
-        await this.db
-          .delete(this.table)
-          .where(whereClause)
+        if (this.softDeleteColumn) {
+          let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date() } as any)
+          if (whereClause) query = query.where(whereClause) as any
+          await query
+        } else {
+          let query = this.db.delete(this.table)
+          if (whereClause) query = query.where(whereClause) as any
+          await query
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         throw new Error(`[Repository.bulkDelete] Failed to delete batch starting at index ${i}: ${message}`)
@@ -297,16 +301,12 @@ export class Repository<TTable extends AnySQLiteTable> {
   async findByIds(syncId: string, ids: string[]) {
     if (ids.length === 0) return []
 
-    const whereClause = this.singleTenant
-      ? inArray(getTableColumn(this.table, 'id'), ids)
-      : and(this.whereSyncId(syncId), inArray(getTableColumn(this.table, 'id'), ids))
+    const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), ids))
 
     try {
-      const results = await this.db
-        .select()
-        .from(this.table)
-        .where(whereClause)
-
+      let query = this.db.select().from(this.table)
+      if (whereClause) query = query.where(whereClause) as any
+      const results = await query
       return results
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

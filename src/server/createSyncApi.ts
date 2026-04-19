@@ -62,7 +62,12 @@ export function createSyncApi(
       config.insertSchema,
       config.updateSchema,
       getRoom,
-      { ...options, syncIdColumn: config.syncIdColumn ?? options?.syncIdColumn ?? 'syncId', singleTenant: (config as any).singleTenant ?? options?.singleTenant ?? false }
+      {
+        ...options,
+        syncIdColumn: config.syncIdColumn ?? options?.syncIdColumn ?? 'syncId',
+        singleTenant: (config as any).singleTenant ?? options?.singleTenant ?? false,
+        softDeleteColumn: (config as any).softDeleteColumn ?? (options as any)?.softDeleteColumn
+      }
     )
 
     app.route(`/${collectionName}`, router)

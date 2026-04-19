@@ -18,7 +18,7 @@ export type ActionType = 'insert' | 'update' | 'delete' | 'bulk-insert' | 'bulk-
  * @template TEntity - Type inferred from select schema
  */
 export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity = any> = {
-  /** Drizzle ORM table definition */
+  /** Drizzle table definition */
   table: TTable
   /** Zod schema for validating insert operations */
   insertSchema: z.ZodType<TInsert>
@@ -33,6 +33,8 @@ export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity
   singleTenant?: boolean
   /** When true, automatically sets createdAt/updatedAt timestamps (default: true) */
   autoTimestamp?: boolean
+  /** Name of the column for soft-delete (e.g. "deletedAt") or `true` to use "deletedAt" as default */
+  softDeleteColumn?: string | boolean
 }
 
 /**
@@ -47,6 +49,7 @@ export type CollectionsMap = Record<string, {
   syncIdColumn?: string
   singleTenant?: boolean
   autoTimestamp?: boolean
+  softDeleteColumn?: string | boolean
 }>
 
 /**

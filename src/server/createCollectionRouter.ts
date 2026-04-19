@@ -3,7 +3,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and, isNull } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import { isDev } from '../shared/logger'
 import { DEFAULT_SYNC_ID } from '../shared/types'
@@ -93,6 +93,11 @@ export interface CollectionRouterOptions {
    * Use this if your wrangler config uses a different binding name.
    */
   dbName?: string
+  /**
+   * Name of the column for soft-delete (e.g. "deletedAt") or `true` to use "deletedAt" as default.
+   * When enabled, GET requests will filter out soft-deleted records.
+   */
+  softDeleteColumn?: string | boolean
 }
 
 /**
@@ -121,6 +126,7 @@ export function createCollectionRouter(
   const syncIdColumn = options?.syncIdColumn ?? 'syncId'
   const singleTenant = options?.singleTenant ?? false
   const dbName = options?.dbName ?? 'DB'
+  const softDeleteCol = options?.softDeleteColumn === true ? 'deletedAt' : (typeof options?.softDeleteColumn === 'string' ? options.softDeleteColumn : null)
 
   const resolveSyncId = (syncId: string | undefined) => singleTenant ? (syncId ?? DEFAULT_SYNC_ID) : syncId!
 
@@ -182,11 +188,19 @@ export function createCollectionRouter(
 
     try {
       const db = drizzle(c.env[dbName as keyof typeof c.env] as D1Database)
-      if (singleTenant) {
-        const results = await db.select().from(table)
-        return c.json({ [collection]: results })
+      const conditions = []
+
+      if (!singleTenant) conditions.push(eq((table as any)[syncIdColumn], syncId))
+      if (softDeleteCol) conditions.push(isNull((table as any)[softDeleteCol]))
+
+      let query = db.select().from(table)
+      if (conditions.length === 1) {
+        query = query.where(conditions[0]) as any
+      } else if (conditions.length > 1) {
+        query = query.where(and(...conditions)) as any
       }
-      const results = await db.select().from(table).where(eq((table as any)[syncIdColumn], syncId))
+
+      const results = await query
       return c.json({ [collection]: results })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
