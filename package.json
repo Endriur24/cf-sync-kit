@@ -84,5 +84,23 @@
     "vitest": "^4.1.4",
     "wrangler": "^4.79.0",
     "zod": "^4.3.6"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Endriur24/cf-sync-kit"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Endriur24/cf-sync-kit#readme",
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "durable-objects",
+    "real-time",
+    "sync",
+    "websocket",
+    "hono",
+    "react",
+    "drizzle",
+    "typescript"
+  ]
 }
