@@ -23,6 +23,7 @@ For the fastest way to get started, clone the standalone todo example that uses 
 git clone https://github.com/Endriur24/cf-sync-kit-todo-example.git
 cd cf-sync-kit-todo-example
 npm install
+npm run cf-typegen
 npm run db:setup:local
 npm run dev
 ```
