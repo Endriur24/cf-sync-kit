@@ -1103,12 +1103,6 @@ Response:
 }
 ```
 
-This endpoint is useful for:
-- Load balancer health checks
-- Kubernetes readiness/liveness probes
-- Monitoring and alerting systems
-- Verifying API availability before client initialization
-
 ## Architecture
 
 ```
