@@ -76,6 +76,9 @@ export class BroadcastSystem {
 
   /**
    * Sets a counter value in memory.
+   * Prepared for future counter reset / manual counter adjustment
+   * (e.g. data migration, test fixtures). Currently used only in tests.
+   * Note: this does NOT persist to storage — use with caution.
    */
   setCounter(collection: string, value: number) {
     this.counters.set(collection, value)
@@ -83,7 +86,8 @@ export class BroadcastSystem {
 
   /**
    * Resets a counter to zero in both memory and storage.
-   * Useful when recreating a Durable Object or after clearing collection data.
+   * Prepared for future scenarios: DO recreation, collection clearing,
+   * counter corruption recovery. Currently used only in tests.
    * Clients with cached counters may detect a "negative gap" and refetch,
    * which is safe but may cause temporary additional load.
    */
