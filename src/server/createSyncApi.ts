@@ -49,8 +49,16 @@ export function createSyncApi(
   })
 
   app.onError((err, c) => {
-    const status = (err as any).status || 500
-    const message = (err as any).message || 'Internal Server Error'
+    let status = (err as any).status || 500
+    let message = (err as any).message || 'Internal Server Error'
+
+    // DO RPC strips the HTTPException prototype; recover status encoded in the message.
+    const match = message.match(/^\[STATUS:(\d{3})\]\s+(.*)$/)
+    if (match) {
+      status = parseInt(match[1], 10)
+      message = match[2]
+    }
+
     console.error('[cf-sync-kit] Unhandled Server Error:', err)
     return c.json({ error: { message } }, status)
   })

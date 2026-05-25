@@ -122,10 +122,10 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       env: this.env,
     }
 
-    await this.middlewareSystem.execute(middlewareCtx)
-
     let result: unknown
     try {
+      await this.middlewareSystem.execute(middlewareCtx)
+
       switch (action) {
         case 'insert':
           result = await repo.create(syncId, payload as Record<string, unknown>)
@@ -155,7 +155,12 @@ export abstract class DurableObjectBase extends Server<Bindings> {
           throw new HTTPException(400, { message: `Unknown action: ${action}` })
       }
     } catch (error) {
-      if (error instanceof HTTPException) throw error
+      // DO RPC strips the HTTPException prototype, so we encode the status in the message.
+      const status = (error as any)?.status
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        const message = (error as any).message || 'Forbidden'
+        throw new HTTPException(status as any, { message: `[STATUS:${status}] ${message}` })
+      }
       log.error(`Mutation failed: ${collection}/${action}`, error)
       throw new HTTPException(500, { message: error instanceof Error ? error.message : 'Mutation failed' })
     }
