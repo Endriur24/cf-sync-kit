@@ -52,11 +52,6 @@ export class Repository<TTable extends AnySQLiteTable> {
     this.softDeleteColumn = typeof softDeleteColumn === 'string' ? softDeleteColumn : (softDeleteColumn ? 'deletedAt' : null)
   }
 
-  private whereSyncId(syncId: string) {
-    if (this.singleTenant) return undefined
-    return eq(getTableColumn(this.table, this.syncIdColumn), syncId)
-  }
-
   private buildWhere(syncId: string, additionalCondition?: any) {
     const conditions = []
     if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
