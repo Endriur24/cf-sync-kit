@@ -4,7 +4,6 @@ export {
   useCollection,
   useUserCollection,
   useUserLiveSync,
-  createSyncHooks,
   type UseCollectionOptions,
   type UseCollectionResult,
 } from './client/hooks/useCollection'

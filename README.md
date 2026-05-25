@@ -342,34 +342,12 @@ app.route('/api', syncApi)
 export default app
 ```
 
-### 4. Create typed hooks (optional but recommended)
-
-```ts
-// client/hooks.ts
-import { createSyncHooks } from 'cf-sync-kit'
-import { collectionsConfig } from '../shared/schema'
-
-export const { useCollection, useUserCollection, useLiveSync, useUserLiveSync } = createSyncHooks(collectionsConfig)
-```
-
-`useUserCollection` and `useUserLiveSync` are convenience hooks that use the `userId` directly as the syncId:
-
-```tsx
-// Instead of:
-useCollection('todos', userId, scope, options)
-useLiveSync(userId, { party: 'main' })
-
-// You can write:
-useUserCollection('todos', userId, scope, options)
-useUserLiveSync(userId, { party: 'main' })
-```
-
-### 5. Use in your React app
+### 4. Use in your React app
 
 ```tsx
 // client/app.tsx
-import { ConnectionProvider } from 'cf-sync-kit'
-import { useCollection, useLiveSync } from './hooks'
+import { ConnectionProvider, useCollection, useLiveSync } from 'cf-sync-kit'
+import { collectionsConfig } from './shared/schema'
 
 function App() {
   return (
@@ -381,7 +359,7 @@ function App() {
 
 function TodoList() {
   useLiveSync('my-project', { debug: true })
-  // No generics needed — types are inferred from collectionsConfig!
+  // Types are inferred from collectionsConfig via the collection name!
   const { data, add, update, remove, isLoading } = useCollection('todos', 'my-project')
 
   if (isLoading) return <div>Loading...</div>
@@ -405,6 +383,18 @@ function TodoList() {
 }
 ```
 
+`useUserCollection` and `useUserLiveSync` are convenience hooks that use the `userId` directly as the syncId:
+
+```tsx
+// Instead of:
+useCollection('todos', userId, scope, options)
+useLiveSync(userId, { party: 'main' })
+
+// You can write:
+useUserCollection('todos', userId, scope, options)
+useUserLiveSync(userId, { party: 'main' })
+```
+
 ## API Reference
 
 ### Client (`cf-sync-kit`)
@@ -413,8 +403,8 @@ function TodoList() {
 |--------|-------------|
 | `ConnectionProvider` | React provider for WebSocket connection state |
 | `useConnectionStatus()` | Returns `{ status, isConnected, isConnecting, isDisconnected }` |
-| `createSyncHooks(config)` | Factory for pre-typed hooks — **recommended** |
-| `useCollection<C, K>(...)` | Generic CRUD hook (use createSyncHooks instead) |
+| `useCollection<C, K>(...)` | Generic CRUD hook — types inferred from collection name |
+| `useUserCollection<C, K>(...)` | Convenience hook — uses `userId` directly as syncId |
 | `useUserCollection<C, K>(...)` | Convenience hook — uses `userId` directly as syncId |
 | `useLiveSync(syncId, options?)` | WebSocket sync hook with broadcast handling |
 | `useUserLiveSync(userId, options?)` | Convenience hook — uses `userId` directly as syncId |
