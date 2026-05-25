@@ -74,23 +74,12 @@ export class BroadcastSystem {
     return counters
   }
 
-  /**
-   * Sets a counter value in memory.
-   * Prepared for future counter reset / manual counter adjustment
-   * (e.g. data migration, test fixtures). Currently used only in tests.
-   * Note: this does NOT persist to storage — use with caution.
-   */
+  /** @internal For tests only. */
   setCounter(collection: string, value: number) {
     this.counters.set(collection, value)
   }
 
-  /**
-   * Resets a counter to zero in both memory and storage.
-   * Prepared for future scenarios: DO recreation, collection clearing,
-   * counter corruption recovery. Currently used only in tests.
-   * Clients with cached counters may detect a "negative gap" and refetch,
-   * which is safe but may cause temporary additional load.
-   */
+  /** @internal For tests only. */
   async resetCounter(collection: string) {
     await this.ensureInitialized()
     try {
