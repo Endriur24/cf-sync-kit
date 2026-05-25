@@ -114,14 +114,10 @@ export class Repository<TTable extends AnySQLiteTable> {
    */
   async findAll(syncId: string) {
     try {
-      const conditions = []
-      if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
-      if (this.softDeleteColumn) conditions.push(isNull(getTableColumn(this.table, this.softDeleteColumn)))
-
+      // buildWhere handles singleTenant + softDelete in one place
+      const whereClause = this.buildWhere(syncId)
       let query = this.db.select().from(this.table)
-      if (conditions.length === 1) query = query.where(conditions[0]) as any
-      else if (conditions.length > 1) query = query.where(and(...conditions)) as any
-
+      if (whereClause) query = query.where(whereClause) as any
       const results = await query
       return results || []
     } catch (error) {
