@@ -3,7 +3,6 @@ export { DurableObjectBase } from './server/DurableObjectBase'
 export { createDurableObject, createGetRoomFn } from './server/create-durable-object'
 export { Repository } from './server/Repository'
 export { BroadcastSystem } from './server/BroadcastSystem'
-export { WebSocketManager, type ConnectionInfo } from './server/WebSocketManager'
 export { MiddlewareSystem } from './server/MiddlewareSystem'
 export type { MiddlewareContext, Middleware } from './server/MiddlewareSystem'
 export { createCollectionRouter } from './server/createCollectionRouter'
@@ -14,7 +13,6 @@ export type { SyncApiOptions } from './server/createSyncApi'
 // Middleware Utilities
 export {
   createAuthMiddleware,
-  createCollectionFilterMiddleware,
   createLoggingMiddleware,
   requireAuth,
   requireOwner,

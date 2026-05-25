@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   createAuthMiddleware,
-  createCollectionFilterMiddleware,
   createLoggingMiddleware,
   requireOwner,
   createSyncAccessMiddleware,
@@ -47,27 +46,6 @@ describe('createAuthMiddleware', () => {
     await middleware(ctx, next)
 
     expect(ctx.userId).toBe('async-user')
-  })
-})
-
-describe('createCollectionFilterMiddleware', () => {
-  it('should allow access to permitted collections', async () => {
-    const middleware = createCollectionFilterMiddleware(['todos', 'notes'])
-    const next = vi.fn()
-
-    await middleware(createMockContext({ collection: 'todos' }), next)
-    await middleware(createMockContext({ collection: 'notes' }), next)
-
-    expect(next).toHaveBeenCalledTimes(2)
-  })
-
-  it('should reject access to unpermitted collections', async () => {
-    const middleware = createCollectionFilterMiddleware(['todos'])
-    const next = vi.fn()
-
-    await expect(
-      middleware(createMockContext({ collection: 'notes' }), next)
-    ).rejects.toThrow("Collection 'notes' is not allowed")
   })
 })
 

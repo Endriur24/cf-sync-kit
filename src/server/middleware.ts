@@ -78,23 +78,6 @@ export function createAuthMiddleware(
 }
 
 /**
- * Creates a collection filtering middleware.
- * Restricts which collections a project can access.
- *
- * @example
- * this.use(createCollectionFilterMiddleware(['todos', 'notes']))
- */
-export function createCollectionFilterMiddleware(allowedCollections: string[]): Middleware {
-  const allowed = new Set(allowedCollections)
-  return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
-    if (!allowed.has(ctx.collection)) {
-      throw new HTTPException(403, { message: `Collection '${ctx.collection}' is not allowed for action '${ctx.action}'` })
-    }
-    await next()
-  }
-}
-
-/**
  * Creates a logging middleware for debugging mutations.
  *
  * @example

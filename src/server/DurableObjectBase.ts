@@ -4,7 +4,6 @@ import type { ActionType, CollectionName } from '../shared/types'
 import type { WsBroadcastEvent } from '../shared/events'
 import type { Repository } from './Repository'
 import { BroadcastSystem } from './BroadcastSystem'
-import { WebSocketManager, type ConnectionInfo } from './WebSocketManager'
 import { MiddlewareSystem, type MiddlewareContext } from './MiddlewareSystem'
 import { log } from '../shared/logger'
 import { HTTPException } from 'hono/http-exception'
@@ -28,30 +27,14 @@ export abstract class DurableObjectBase extends Server<Bindings> {
 
   protected repositories = new Map<string, Repository<any>>()
   protected broadcastSystem: BroadcastSystem
-  protected wsManager: WebSocketManager
   protected middlewareSystem: MiddlewareSystem
+  // Direct Map instead of a wrapper class — WebSocket connections are just ids
+  private connections = new Map<string, { id: string }>()
 
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env)
     this.broadcastSystem = new BroadcastSystem(ctx.storage)
-    this.wsManager = new WebSocketManager()
     this.middlewareSystem = new MiddlewareSystem()
-  }
-
-  /**
-   * Returns the number of currently connected WebSocket clients.
-   * Useful for monitoring and health checks.
-   */
-  get connectionCount(): number {
-    return this.wsManager.getConnectionCount()
-  }
-
-  /**
-   * Returns a snapshot of all current WebSocket connections with metadata.
-   * Useful for monitoring and debugging.
-   */
-  get connectedClients(): ConnectionInfo[] {
-    return this.wsManager.getConnections()
   }
 
   /**
@@ -83,7 +66,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
    */
   async onConnect(connection: Connection) {
     log.debug('Client connected:', connection.id)
-    this.wsManager.onConnect(connection)
+    this.connections.set(connection.id, { id: connection.id })
 
     try {
       const counters = await this.broadcastSystem.getAllCounters()
@@ -104,7 +87,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
    * Called when a client disconnects.
    */
   onDisconnect(connection: Connection) {
-    this.wsManager.onDisconnect(connection.id)
+    this.connections.delete(connection.id)
   }
 
   /**

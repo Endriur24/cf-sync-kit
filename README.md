@@ -624,7 +624,6 @@ interface UseLiveSyncOptions {
 | `createCollectionRouter(...)` | Creates router for a single collection |
 | `MiddlewareSystem` | Middleware chain manager |
 | `createAuthMiddleware(getUserId)` | Authentication middleware |
-| `createCollectionFilterMiddleware(allowed)` | Collection access control |
 | `createLoggingMiddleware()` | Mutation logging |
 | `requireAuth()` | Requires `ctx.userId` to be set |
 | `requireOwner(options?)` | Requires record owner matches `ctx.userId` |
@@ -633,7 +632,6 @@ interface UseLiveSyncOptions {
 | `createCollectionAccessMiddleware(rules)` | Granular action-specific collection access control |
 | `CustomAccess` | Interface for custom access context (extend via module augmentation) |
 | `BroadcastSystem` | Manages broadcast counters and event distribution |
-| `WebSocketManager` | Manages WebSocket connections in the DO |
 | `MiddlewareContext` | Context object passed to middleware functions |
 | `Middleware` | Middleware function type |
 | `RoomMutator` | Interface for DO room mutation methods |
@@ -748,7 +746,6 @@ createSyncAccessMiddleware(async (userId, syncId) => {
 | `createSyncAccessMiddleware(validate)` | Custom syncId validation |
 | `createDefaultSyncAccessValidator(prefix?)` | Helper for per-user syncId validation (default: exact match) |
 | `createAuthMiddleware(getUserId)` | Auth inside DO (extracts userId from context) |
-| `createCollectionFilterMiddleware(allowed)` | Restricts accessible collections |
 | `createLoggingMiddleware()` | Logs mutations for debugging |
 
 #### requireOwner Options
@@ -961,8 +958,11 @@ this.use(createAuthMiddleware(async (ctx) => {
   return await verifyToken(token)
 }))
 
-// Collection access control
-this.use(createCollectionFilterMiddleware(['todos', 'notes']))
+// Collection access control (whitelist collections, all actions allowed)
+this.use(createCollectionAccessMiddleware({
+  todos: { '*': true },
+  notes: { '*': true },
+}))
 
 // Logging
 this.use(createLoggingMiddleware())
