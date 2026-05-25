@@ -86,13 +86,10 @@ export function createDurableObject<TConfig extends CollectionsMap>(
     constructor(ctx: DurableObjectState, env: Bindings) {
       super(ctx, env)
       Object.entries(collectionsConfig).forEach(([name, config]) => {
+        // defineCollections() already validates singleTenant vs syncIdColumn —
+        // they are mutually exclusive: singleTenant means no tenant isolation,
+        // syncIdColumn means per-tenant isolation.
         const singleTenant = (config as any).singleTenant ?? false
-        if (singleTenant && config.syncIdColumn !== undefined) {
-          console.warn(
-            `[cf-sync-kit] Collection "${name}" has both singleTenant and syncIdColumn. ` +
-            `singleTenant takes precedence — syncIdColumn will be ignored.`
-          )
-        }
         this.registerRepository(
           new Repository<AnySQLiteTable>(
             env[dbName as keyof typeof env] as D1Database,
