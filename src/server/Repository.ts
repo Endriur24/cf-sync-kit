@@ -92,11 +92,7 @@ export class Repository<TTable extends AnySQLiteTable> {
    */
   async findAll(syncId: string) {
     try {
-      // buildWhere handles singleTenant + softDelete in one place
-      const whereClause = this.buildWhere(syncId)
-      let query = this.db.select().from(this.table)
-      if (whereClause) query = query.where(whereClause) as any
-      const results = await query
+      const results = await this.db.select().from(this.table).where(this.buildWhere(syncId))
       return results || []
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -113,13 +109,13 @@ export class Repository<TTable extends AnySQLiteTable> {
       ...data,
       ...(this.autoTimestamp ? { updatedAt: new Date() } : {}),
     }
-    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
 
     try {
-      let query = this.db.update(this.table).set(updateData)
-      if (whereClause) query = query.where(whereClause) as any
-
-      const results = await query.returning()
+      const results = await this.db
+        .update(this.table)
+        .set(updateData)
+        .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id)))
+        .returning()
       return results[0] || null
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -134,13 +130,12 @@ export class Repository<TTable extends AnySQLiteTable> {
     const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
     try {
       if (this.softDeleteColumn) {
-        let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
-        if (whereClause) query = query.where(whereClause) as any
-        await query
+        await this.db
+          .update(this.table)
+          .set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
+          .where(whereClause)
       } else {
-        let query = this.db.delete(this.table)
-        if (whereClause) query = query.where(whereClause) as any
-        await query
+        await this.db.delete(this.table).where(whereClause)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -209,7 +204,6 @@ export class Repository<TTable extends AnySQLiteTable> {
       const batch = items.slice(i, i + batchSize)
 
       try {
-        // Build batch queries - each update is a separate statement
         const queries = batch.map((item) => {
           const { id, data } = item
           const updateData: Record<string, unknown> = {
@@ -217,11 +211,11 @@ export class Repository<TTable extends AnySQLiteTable> {
             ...(this.autoTimestamp ? { updatedAt: now } : {}),
           }
 
-          const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
-
-          let query = this.db.update(this.table).set(updateData)
-          if (whereClause) query = query.where(whereClause) as any
-          return query.returning()
+          return this.db
+            .update(this.table)
+            .set(updateData)
+            .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id)))
+            .returning()
         })
 
         // Execute all updates in a single batch request
@@ -254,13 +248,12 @@ export class Repository<TTable extends AnySQLiteTable> {
         const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), batch))
 
         if (this.softDeleteColumn) {
-          let query = this.db.update(this.table).set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
-          if (whereClause) query = query.where(whereClause) as any
-          await query
+          await this.db
+            .update(this.table)
+            .set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
+            .where(whereClause)
         } else {
-          let query = this.db.delete(this.table)
-          if (whereClause) query = query.where(whereClause) as any
-          await query
+          await this.db.delete(this.table).where(whereClause)
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
