@@ -102,7 +102,7 @@ export type MutationPayload<TAction extends ActionType = ActionType> = {
  */
 export type PendingMutationInfo = {
   entityId?: string
-  action: 'insert' | 'update' | 'delete' | 'bulk-insert' | 'bulk-update' | 'bulk-delete'
+  action: ActionType
 }
 
 /**
