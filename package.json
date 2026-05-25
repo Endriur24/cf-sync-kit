@@ -83,7 +83,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Endriur24/cf-sync-kit"
+    "url": "git+https://github.com/Endriur24/cf-sync-kit.git"
   },
   "license": "MIT",
   "homepage": "https://github.com/Endriur24/cf-sync-kit#readme",
