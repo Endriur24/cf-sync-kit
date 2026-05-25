@@ -129,19 +129,6 @@ export function useLiveSync(
     registry.register(syncId)
     prevSyncIdRef.current = syncId
   }
-  useEffect(() => {
-    lastBroadcastIds.current.clear()
-    syncState.current.isSyncing = false
-    syncState.current.queue = []
-    if (syncState.current.timeoutId) {
-      clearTimeout(syncState.current.timeoutId)
-      syncState.current.timeoutId = null
-    }
-  }, [syncId])
-
-  useEffect(() => {
-    return () => registry.unregister(syncId)
-  }, [syncId, registry])
 
   const syncState = useRef<{ isSyncing: boolean; queue: WsBroadcastEvent[]; timeoutId: ReturnType<typeof setTimeout> | null }>({
     isSyncing: false,
@@ -149,6 +136,25 @@ export function useLiveSync(
     timeoutId: null,
   })
   const lastBroadcastIds = useRef<Map<string, number>>(new Map())
+
+  // Cancel and reset the fallback timeout used when sync-init doesn't arrive
+  const clearFallbackTimeout = useCallback(() => {
+    if (syncState.current.timeoutId) {
+      clearTimeout(syncState.current.timeoutId)
+      syncState.current.timeoutId = null
+    }
+  }, [])
+
+  useEffect(() => {
+    lastBroadcastIds.current.clear()
+    syncState.current.isSyncing = false
+    syncState.current.queue = []
+    clearFallbackTimeout()
+  }, [syncId, clearFallbackTimeout])
+
+  useEffect(() => {
+    return () => registry.unregister(syncId)
+  }, [syncId, registry])
 
   const debugLog = useCallback((...args: unknown[]) => {
     if (debug) log.debug('[useLiveSync]', ...args)
@@ -159,12 +165,13 @@ export function useLiveSync(
     if (debug) log.error('[useLiveSync]', error.message, error.details)
   }, [onError, debug])
 
+  // Merge incoming into existing; keep existing if incoming is older
   const compareUpdatedAt = useCallback((existing: any, incoming: any) => {
-    if (!incoming.updatedAt || !existing.updatedAt) return Object.assign({}, existing, incoming)
+    if (!incoming.updatedAt || !existing.updatedAt) return { ...existing, ...incoming }
     if (new Date(incoming.updatedAt).getTime() < new Date(existing.updatedAt).getTime()) {
       return existing
     }
-    return Object.assign({}, existing, incoming)
+    return { ...existing, ...incoming }
   }, [])
 
   const handleBroadcast = useCallback(
@@ -172,11 +179,12 @@ export function useLiveSync(
       if (scope !== undefined && message.scope !== undefined && message.scope !== scope) {
         return
       }
+      // Use message-level scope, fall back to hook-level scope
       applyMutationToCache(
         queryClient,
         message.collection,
         syncId,
-        message.scope !== undefined ? message.scope : scope,
+        message.scope ?? scope,
         message.action,
         message.payload,
         compareUpdatedAt
@@ -203,7 +211,7 @@ export function useLiveSync(
       syncState.current.isSyncing = true
 
       // Fallback timeout: if sync-init doesn't arrive within 5s, unblock message processing
-      if (syncState.current.timeoutId) clearTimeout(syncState.current.timeoutId)
+      clearFallbackTimeout()
       syncState.current.timeoutId = setTimeout(() => {
         if (syncState.current.isSyncing) {
           debugLog('Sync-init timeout — unblocking message processing')
@@ -248,22 +256,18 @@ export function useLiveSync(
         })
 
         try {
+          // Match queries by exact syncId and scope position in queryKey
           await queryClient.refetchQueries({
             predicate: (query) => {
-              const matchesSyncId = query.queryKey.includes(syncId)
-              if (!scope) return matchesSyncId
-              return matchesSyncId && query.queryKey.includes(scope)
+              const [_collection, qSyncId, qScope] = query.queryKey as [string, string, string | undefined]
+              return qSyncId === syncId && (!scope || qScope === scope)
             },
           })
           debugLog('Refetch complete')
         } catch (e) {
           reportError(new SyncError('Failed to refetch queries during sync', 'REFETCH_ERROR', undefined, e))
         } finally {
-          // Clear the fallback timeout
-          if (syncState.current.timeoutId) {
-            clearTimeout(syncState.current.timeoutId)
-            syncState.current.timeoutId = null
-          }
+          clearFallbackTimeout()
           syncState.current.isSyncing = false
           syncState.current.queue.forEach(handleBroadcast)
           syncState.current.queue = []
@@ -282,27 +286,31 @@ export function useLiveSync(
 
       const lastId = lastBroadcastIds.current.get(message.collection) ?? 0
 
-      if (message.broadcastId !== undefined) {
-        if (message.broadcastId > lastId) {
-          if (message.broadcastId > lastId + 1) {
-            debugLog(
-              `Gap in broadcasts for ${message.collection} (expected ${lastId + 1}, got ${message.broadcastId}), refetching`
-            )
-            queryClient.refetchQueries({
-              queryKey: [message.collection, syncId, message.scope],
-            })
-          } else {
-            handleBroadcast(message)
-            debugLog('Applied broadcast:', message.action, message.collection)
-          }
-          lastBroadcastIds.current.set(message.collection, message.broadcastId)
-        } else {
-          debugLog('Ignored old/duplicate message for', message.collection, '(id:', message.broadcastId, ')')
-        }
-      } else {
+      // No counter support — apply immediately
+      if (message.broadcastId === undefined) {
         handleBroadcast(message)
         debugLog('Applied message without broadcastId:', message.action, message.collection)
+        return
       }
+
+      if (message.broadcastId <= lastId) {
+        debugLog('Ignored old/duplicate message for', message.collection, '(id:', message.broadcastId, ')')
+        return
+      }
+
+      if (message.broadcastId > lastId + 1) {
+        debugLog(
+          `Gap in broadcasts for ${message.collection} (expected ${lastId + 1}, got ${message.broadcastId}), refetching`
+        )
+        queryClient.refetchQueries({
+          queryKey: [message.collection, syncId, message.scope],
+        })
+      } else {
+        handleBroadcast(message)
+        debugLog('Applied broadcast:', message.action, message.collection)
+      }
+
+      lastBroadcastIds.current.set(message.collection, message.broadcastId)
     },
 
     onClose: () => {
