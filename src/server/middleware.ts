@@ -95,22 +95,6 @@ export function createCollectionFilterMiddleware(allowedCollections: string[]): 
 }
 
 /**
- * Logger interface for middleware logging.
- */
-export interface MutationLogger {
-  info(message: string, data?: Record<string, unknown>): void
-  error(message: string, data?: Record<string, unknown>): void
-}
-
-/**
- * Default logger using console methods.
- */
-export const defaultMutationLogger: MutationLogger = {
-  info: (message, data) => console.log(`[Mutation] ${message}`, data ?? ''),
-  error: (message, data) => console.error(`[Mutation Error] ${message}`, data ?? ''),
-}
-
-/**
  * Creates a logging middleware for debugging mutations.
  *
  * @example
@@ -122,8 +106,16 @@ export const defaultMutationLogger: MutationLogger = {
  *   logger: winstonLogger
  * }))
  */
-export function createLoggingMiddleware(options?: { logger?: MutationLogger }): Middleware {
-  const logger = options?.logger ?? defaultMutationLogger
+export function createLoggingMiddleware(options?: {
+  logger?: {
+    info(message: string, data?: Record<string, unknown>): void
+    error(message: string, data?: Record<string, unknown>): void
+  }
+}): Middleware {
+  const logger = options?.logger ?? {
+    info: (message, data) => console.log(`[Mutation] ${message}`, data ?? ''),
+    error: (message, data) => console.error(`[Mutation Error] ${message}`, data ?? ''),
+  }
 
   return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
     const start = Date.now()

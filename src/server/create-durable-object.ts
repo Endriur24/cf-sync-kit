@@ -11,7 +11,7 @@ export interface DurableObjectClass {
   new(ctx: DurableObjectState, env: Bindings): DurableObjectBase
 }
 
-export interface CreateDurableObjectResult<TConfig extends CollectionsMap> {
+export interface CreateDurableObjectResult {
   SyncRoom: DurableObjectClass
 }
 
@@ -69,7 +69,7 @@ export interface CreateDurableObjectResult<TConfig extends CollectionsMap> {
 export function createDurableObject<TConfig extends CollectionsMap>(
   collectionsConfig: TConfig,
   options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset; dbName?: string }
-): CreateDurableObjectResult<TConfig> {
+): CreateDurableObjectResult {
   const className = options?.className ?? 'SyncRoom'
   const dbName = options?.dbName ?? 'DB'
 
