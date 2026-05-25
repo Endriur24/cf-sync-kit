@@ -4,6 +4,7 @@ import type { CollectionsMap, InferInsert, InferUpdate, InferEntity, PendingMuta
 import { SyncError, DEFAULT_SYNC_ID } from '../../shared/types'
 import type { UseLiveSyncOptions } from './useLiveSync'
 import { useLiveSync } from './useLiveSync'
+import { applyMutationToCache } from './cacheUpdater'
 import { useLiveSyncRegistrySafe } from '../context/ConnectionContext'
 import { log as debugLog, isDev } from '../../shared/logger'
 
@@ -318,16 +319,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onSuccess: (result, variables, context) => {
       const entity = result.data
       if (!entity) return
-      queryClient.setQueryData<Entity[]>(
-        queryKey,
-        (oldData) => {
-          if (!oldData) return [entity]
-          const withoutOptimistic = oldData.filter(item => item.id !== context?.optimisticId)
-          return withoutOptimistic.some(item => item.id === entity.id)
-            ? withoutOptimistic
-            : [entity, ...withoutOptimistic]
-        }
-      )
+      applyMutationToCache(queryClient, collection, syncId, scope, 'insert', entity)
       log('Add success:', entity)
     },
     onError: (err, variables, context) => {
@@ -383,15 +375,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onSuccess: (result) => {
       const entity = result.data
       if (!entity) return
-      queryClient.setQueryData<Entity[]>(
-        queryKey,
-        (oldData) => {
-          if (!oldData) return []
-          return oldData.map((item) =>
-            item.id === entity.id ? { ...item, ...entity } : item
-          )
-        }
-      )
+      applyMutationToCache(queryClient, collection, syncId, scope, 'update', entity)
       log('Update success:', entity)
     },
     onError: (err, variables, context) => {
@@ -446,13 +430,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       return { previousData }
     },
     onSuccess: (_result, variables) => {
-      queryClient.setQueryData<Entity[]>(
-        queryKey,
-        (oldData) => {
-          if (!oldData) return []
-          return oldData.filter((item) => item.id !== variables.id)
-        }
-      )
+      applyMutationToCache(queryClient, collection, syncId, scope, 'delete', { id: variables.id })
       log('Remove success:', variables.id)
     },
     onError: (err, variables, context) => {
@@ -498,13 +476,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       return { previousData }
     },
     onSuccess: (result, variables, context) => {
-      queryClient.setQueryData<Entity[]>(queryKey, (old) => {
-        const optimisticIds = context?.optimisticIds ?? []
-        const cleaned = (old ?? []).filter(item => !optimisticIds.includes(item.id))
-        const existingIds = new Set(cleaned.map(item => item.id))
-        const newEntities = result.data.filter(e => !existingIds.has(e.id))
-        return [...newEntities, ...cleaned]
-      })
+      applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-insert', result.data)
     },
     onError: (err, variables, context) => {
       if (context?.previousData) {
@@ -553,13 +525,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     },
     onSuccess: (result) => {
       if (!result.data?.length) return
-      const updatesMap = new Map(result.data.map(e => [e.id, e]))
-      queryClient.setQueryData<Entity[]>(queryKey, (old) =>
-        (old ?? []).map((item) => {
-          const update = updatesMap.get(item.id)
-          return update ? { ...item, ...update } : item
-        })
-      )
+      applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-update', result.data)
     },
     onError: (err, variables, context) => {
       if (context?.previousData) {
@@ -603,10 +569,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       return { previousData }
     },
     onSuccess: (_result, variables) => {
-      const idsToDelete = new Set(variables.ids)
-      queryClient.setQueryData<Entity[]>(queryKey, (old) =>
-        (old ?? []).filter((item) => !idsToDelete.has(item.id))
-      )
+      applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-delete', variables.ids)
     },
     onError: (err, variables, context) => {
       if (context?.previousData) {

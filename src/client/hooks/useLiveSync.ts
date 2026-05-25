@@ -5,6 +5,7 @@ import {
   WsEventSchema,
   type WsBroadcastEvent,
 } from "../../shared/events"
+import { applyMutationToCache } from "./cacheUpdater"
 import { useConnectionStatus, useLiveSyncRegistry } from "../context/ConnectionContext"
 import { SyncError, DEFAULT_SYNC_ID } from "../../shared/types"
 import { log } from "../../shared/logger"
@@ -166,61 +167,19 @@ export function useLiveSync(
     return Object.assign({}, existing, incoming)
   }, [])
 
-  const applyMutationToCache = useCallback(
+  const handleBroadcast = useCallback(
     (message: WsBroadcastEvent) => {
       if (scope !== undefined && message.scope !== undefined && message.scope !== scope) {
         return
       }
-
-      const collection = message.collection
-      const targetScope = message.scope !== undefined ? message.scope : scope
-      const payload = message.payload as any
-
-      queryClient.setQueryData<unknown[]>(
-        [collection, syncId, targetScope],
-        (oldData) => {
-          if (!oldData) {
-            if (message.action === "insert") return [payload]
-            if (message.action === "bulk-insert") return payload as unknown[]
-            return []
-          }
-
-          switch (message.action) {
-            case "insert":
-              return (oldData as any[]).some((item) => item.id === payload.id)
-                ? oldData
-                : [payload, ...oldData]
-            case "update":
-              return (oldData as any[]).map((item) =>
-                item.id === payload.id
-                  ? compareUpdatedAt(item, payload)
-                  : item
-              )
-            case "delete":
-              return (oldData as any[]).filter((item) => item.id !== payload.id)
-            case "bulk-insert": {
-              const payloads = payload as any[]
-              const existingIds = new Set((oldData as any[]).map(item => item.id))
-              const newItems = payloads.filter(p => !existingIds.has(p.id))
-              return [...newItems, ...oldData]
-            }
-            case "bulk-update": {
-              const payloads = payload as any[]
-              const updatesMap = new Map(payloads.map(p => [p.id, p]))
-              return (oldData as any[]).map((item) => {
-                const update = updatesMap.get(item.id)
-                return update ? compareUpdatedAt(item, update) : item
-              })
-            }
-            case "bulk-delete": {
-              const idsArray = Array.isArray(payload) ? payload : payload.ids;
-              const idsToDelete = new Set(idsArray);
-              return (oldData as any[]).filter((item) => !idsToDelete.has(item.id))
-            }
-            default:
-              return oldData
-          }
-        }
+      applyMutationToCache(
+        queryClient,
+        message.collection,
+        syncId,
+        message.scope !== undefined ? message.scope : scope,
+        message.action,
+        message.payload,
+        compareUpdatedAt
       )
     },
     [syncId, queryClient, compareUpdatedAt, scope]
@@ -249,7 +208,7 @@ export function useLiveSync(
         if (syncState.current.isSyncing) {
           debugLog('Sync-init timeout — unblocking message processing')
           syncState.current.isSyncing = false
-          syncState.current.queue.forEach(applyMutationToCache)
+          syncState.current.queue.forEach(handleBroadcast)
           syncState.current.queue = []
         }
       }, 5000)
@@ -306,7 +265,7 @@ export function useLiveSync(
             syncState.current.timeoutId = null
           }
           syncState.current.isSyncing = false
-          syncState.current.queue.forEach(applyMutationToCache)
+          syncState.current.queue.forEach(handleBroadcast)
           syncState.current.queue = []
         }
         return
@@ -333,7 +292,7 @@ export function useLiveSync(
               queryKey: [message.collection, syncId, message.scope],
             })
           } else {
-            applyMutationToCache(message)
+            handleBroadcast(message)
             debugLog('Applied broadcast:', message.action, message.collection)
           }
           lastBroadcastIds.current.set(message.collection, message.broadcastId)
@@ -341,7 +300,7 @@ export function useLiveSync(
           debugLog('Ignored old/duplicate message for', message.collection, '(id:', message.broadcastId, ')')
         }
       } else {
-        applyMutationToCache(message)
+        handleBroadcast(message)
         debugLog('Applied message without broadcastId:', message.action, message.collection)
       }
     },
