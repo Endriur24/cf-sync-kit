@@ -106,14 +106,9 @@ export const collectionsConfig = defineCollections({
 
 No need to define intermediate types like `TodoSelectSchema`, `Todo`, `CollectionName` — the framework infers everything from `collectionsConfig`.
 
-> **Tip:** If your syncId column is named `syncId` (the default), you can omit it explicitly:
+> **Tip:** If your syncId column is named `syncId` (the default), omit it from your insertSchema:
 > ```ts
 > insertSchema: createInsertSchema(todosTable).omit({ id: true, createdAt: true, updatedAt: true, syncId: true })
-> ```
-> Or use the helper:
-> ```ts
-> import { omitSyncIdColumn } from 'cf-sync-kit/server'
-> insertSchema: omitSyncIdColumn(createInsertSchema(todosTable), 'syncId').omit({ id: true, createdAt: true, updatedAt: true })
 > ```
 
 #### syncIdColumn
@@ -130,13 +125,6 @@ syncIdColumn: 'project_id'
 // Per-tenant model
 syncIdColumn: 'tenant_id'
 ```
-
-> **Tip:** You can use `omitSyncIdColumn` helper to automatically omit the syncId column:
-> ```ts
-> import { omitSyncIdColumn } from 'cf-sync-kit/server'
-> 
-> insertSchema: omitSyncIdColumn(createInsertSchema(todosTable), 'project_id')
-> ```
 
 #### Single-Tenant Mode
 
@@ -634,7 +622,6 @@ interface UseLiveSyncOptions {
 | `Repository` | CRUD operations for a Drizzle table |
 | `createSyncApi(collections, getRoom, options?)` | Creates Hono router with sync endpoints |
 | `createCollectionRouter(...)` | Creates router for a single collection |
-| `omitSyncIdColumn(schema, column)` | Helper to omit syncId column from Zod schema |
 | `MiddlewareSystem` | Middleware chain manager |
 | `createAuthMiddleware(getUserId)` | Authentication middleware |
 | `createCollectionFilterMiddleware(allowed)` | Collection access control |

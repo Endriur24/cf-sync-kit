@@ -8,27 +8,6 @@ import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import { isDev } from '../shared/logger'
 import { DEFAULT_SYNC_ID } from '../shared/types'
 
-/**
- * Helper to omit syncIdColumn from a Zod schema.
- * Useful when you want to use createInsertSchema directly without manual .omit().
- *
- * @example
- * const insertSchema = omitSyncIdColumn(createInsertSchema(todosTable), 'project_id')
- */
-export function omitSyncIdColumn<T extends z.ZodType>(
-  schema: T,
-  syncIdColumn: string
-): T {
-  if (schema instanceof z.ZodObject) {
-    const shape = (schema as z.ZodObject<z.ZodRawShape>).shape
-    if (syncIdColumn in shape) {
-      const omitFields: Record<string, true> = { [syncIdColumn]: true }
-      return schema.omit(omitFields) as unknown as T
-    }
-  }
-  return schema
-}
-
 const syncMetaSchema = z.object({
   syncId: z.string().min(1).optional(),
   _clientMutationId: z.string().optional(),
@@ -136,7 +115,7 @@ export function createCollectionRouter(
       console.warn(
         `[cf-sync-kit] Warning: insertSchema for "${collection}" includes the syncIdColumn "${syncIdColumn}". ` +
         `This field will be stripped from the payload. ` +
-        `Consider using .omit({ ${syncIdColumn}: true }) or omitSyncIdColumn() helper.`
+        `Consider using .omit({ ${syncIdColumn}: true }).`
       )
     }
   }
