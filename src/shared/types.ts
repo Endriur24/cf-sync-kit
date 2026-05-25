@@ -41,16 +41,7 @@ export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity
  * Map of collection names to their configurations.
  * Used as the primary type parameter for type-safe hooks.
  */
-export type CollectionsMap = Record<string, {
-  table: any
-  insertSchema: z.ZodType<any>
-  updateSchema: z.ZodType<any>
-  selectSchema: z.ZodType<any>
-  syncIdColumn?: string
-  singleTenant?: boolean
-  autoTimestamp?: boolean
-  softDeleteColumn?: string | boolean
-}>
+export type CollectionsMap = Record<string, CollectionConfig>
 
 /**
  * Infers the insert type for a specific collection.
@@ -89,15 +80,6 @@ export type InferEntity<T extends CollectionsMap, K extends keyof T> =
     : never
 
 /**
- * Payload for a mutation operation.
- */
-export type MutationPayload<TAction extends ActionType = ActionType> = {
-  action: TAction
-  payload: any
-  clientMutationId?: string
-}
-
-/**
  * Tracks pending optimistic mutations on the client.
  */
 export type PendingMutationInfo = {
@@ -114,55 +96,6 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
  * Collection name identifier.
  */
 export type CollectionName = string
-
-/**
- * Scope string for filtering broadcasts within a collection.
- * Allows multiple logical groups to share the same WebSocket/DO
- * without cross-contamination of updates.
- */
-export type Scope = string | undefined
-
-/**
- * Maps all collection names to their entity types.
- * @example
- * type Entities = EntityMap<typeof collectionsConfig>
- * // { todos: Todo; notes: Note }
- */
-export type EntityMap<T extends CollectionsMap> = {
-  [K in keyof T]: InferEntity<T, K>
-}
-
-/**
- * Maps all collection names to their insert types.
- * Note: syncIdColumn is injected server-side — omit it from your insertSchema.
- * @example
- * type Inserts = InsertMap<typeof collectionsConfig>
- */
-export type InsertMap<T extends CollectionsMap> = {
-  [K in keyof T]: InferInsert<T, K>
-}
-
-/**
- * Maps all collection names to their update types.
- * @example
- * type Updates = UpdateMap<typeof collectionsConfig>
- */
-export type UpdateMap<T extends CollectionsMap> = {
-  [K in keyof T]: InferUpdate<T, K>
-}
-
-/**
- * Extracts the entity type with a guaranteed id field.
- * Useful for typing cache operations without `as any` casts.
- */
-export type WithId<T = unknown> = T & { id: string }
-
-/**
- * Collection name keys from a CollectionsMap.
- * @example
- * type Names = CollectionKeys<typeof collectionsConfig> // 'todos' | 'notes'
- */
-export type CollectionKeys<T extends CollectionsMap> = keyof T & string
 
 /**
  * Custom error class for sync-related errors.

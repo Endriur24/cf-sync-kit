@@ -18,15 +18,8 @@ export type {
   InferInsert,
   InferUpdate,
   InferEntity,
-  MutationPayload,
   PendingMutationInfo,
   CollectionName,
-  Scope,
-  EntityMap,
-  InsertMap,
-  UpdateMap,
-  WithId,
-  CollectionKeys,
   ConnectionStatus,
 } from './shared/types'
 export { SyncError, isSyncError, defineCollections, DEFAULT_SYNC_ID } from './shared/types'

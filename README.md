@@ -650,15 +650,7 @@ interface UseLiveSyncOptions {
 | `InferInsert<C, K>` | Infer insert type from collection config |
 | `InferUpdate<C, K>` | Infer update type from collection config |
 | `InferEntity<C, K>` | Infer entity type from collection config |
-| `MutationPayload` | Payload for a mutation operation |
 | `PendingMutationInfo` | Tracks pending optimistic mutations |
-| `CollectionName` | Collection name identifier |
-| `Scope` | Scope string for filtering broadcasts |
-| `EntityMap<T>` | Maps all collections to entity types |
-| `InsertMap<T>` | Maps all collections to insert types |
-| `UpdateMap<T>` | Maps all collections to update types |
-| `WithId<T>` | Type with guaranteed `id: string` field |
-| `CollectionKeys<T>` | Union of collection names |
 | `ConnectionStatus` | `'connecting' \| 'connected' \| 'disconnected'` |
 | `SyncError` | Custom error class with code, status, and details |
 | `isSyncError(err)` | Type guard to check if error is a SyncError |
