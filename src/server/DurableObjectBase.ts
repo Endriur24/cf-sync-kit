@@ -28,8 +28,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   protected repositories = new Map<string, Repository<any>>()
   protected broadcastSystem: BroadcastSystem
   protected middlewareSystem: MiddlewareSystem
-  // Direct Map instead of a wrapper class — WebSocket connections are just ids
-  private connections = new Map<string, { id: string }>()
+  private connections = new Set<string>()
 
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env)
@@ -66,7 +65,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
    */
   async onConnect(connection: Connection) {
     log.debug('Client connected:', connection.id)
-    this.connections.set(connection.id, { id: connection.id })
+    this.connections.add(connection.id)
 
     try {
       const counters = await this.broadcastSystem.getAllCounters()
