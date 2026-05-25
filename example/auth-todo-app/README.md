@@ -4,18 +4,17 @@ Demonstrates user-scoped synchronization with authentication using `cf-sync-kit`
 
 ## Features
 
-- **User-scoped sync**: Each user has their own isolated Durable Object instance
-- **Basic authentication**: Simple username/password auth with Hono middleware
-- **Per-user data isolation**: Users can only see and sync their own todos
-- **`useUserCollection`**: Hook for user-scoped collection access
-- **`useUserLiveSync`**: Hook for user-scoped live synchronization
-- **`syncIdColumn`**: Database column for isolating data per user
+- **Authentication**: Username/password login with session management
+- **Real-time Sync**: WebSocket-based live updates across clients
+- **User Isolation**: Each user only sees their own todos
 
-## Key Functions Demonstrated
+## Key Differences from Basic Todo App
 
-### Client-side
-- `useUserCollection` - Hook for user-scoped collection data
-- `useUserLiveSync` - Hook for user-scoped real-time sync
+This example demonstrates the `per-user` Durable Object preset, which automatically enforces that users can only access their own data.
+
+- `createDurableObject(..., { preset: 'per-user' })` — automatic auth + ownership middleware
+- `useCollection` — with userId as syncId for per-user data
+- `useLiveSync` — with userId for user-scoped WebSocket room
 - `useConnectionStatus` - Hook for tracking connection state
 
 ### Server-side

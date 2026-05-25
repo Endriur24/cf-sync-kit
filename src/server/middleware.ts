@@ -192,73 +192,93 @@ export function requireOwner(options: RequireOwnerOptions | string = {}): Middle
       throw new HTTPException(401, { message: 'Unauthorized' })
     }
 
-    const payload = ctx.payload as Record<string, unknown>
+    const { action, payload, userId, collection } = ctx
 
-    switch (ctx.action) {
+    switch (action) {
       case 'insert': {
-        const recordOwner = payload[ownerField] as string | undefined
-        if (recordOwner && recordOwner !== ctx.userId) {
-          throw new HTTPException(403, { message: 'Forbidden: you can only create your own records (ownerId mismatch)' })
-        }
+        validateItemOwner(payload as Record<string, unknown>, ownerField, userId, 'insert')
         break
       }
-
       case 'bulk-insert': {
-        const items = ctx.payload as Record<string, unknown>[]
-        for (const item of items) {
-          const recordOwner = item[ownerField] as string | undefined
-          if (recordOwner && recordOwner !== ctx.userId) {
-            throw new HTTPException(403, {
-              message: 'Forbidden: you can only create your own records (ownerId mismatch in bulk-insert)',
-            })
-          }
+        for (const item of payload as Record<string, unknown>[]) {
+          validateItemOwner(item, ownerField, userId, 'bulk-insert')
         }
         break
       }
-
       case 'update':
-      case 'delete':
-        if (checkOnUpdateDelete) {
-          if (ownerCheckQuery) {
-            const isOwner = await ownerCheckQuery(ctx)
-            if (!isOwner) {
-              throw new HTTPException(403, { message: 'Forbidden: you do not own this record' })
-            }
-          } else {
-            throw new HTTPException(500, {
-              message: `Misconfiguration: requireOwner with checkOnUpdateDelete=true requires ownerCheckQuery for collection "${ctx.collection}". Provide a custom ownership verification function.`,
-            })
-          }
-        }
+      case 'delete': {
+        await validateOwnership(ctx, ownerCheckQuery, checkOnUpdateDelete, collection)
         break
-
-      case 'bulk-update':
-      case 'bulk-delete':
-        if (checkOnUpdateDelete) {
-          if (ownerCheckQuery) {
-            // For bulk operations, run ownerCheckQuery for each item
-            const items = ctx.action === 'bulk-update'
-              ? (ctx.payload as { id: string; data: Record<string, unknown> }[])
-              : (ctx.payload as string[]).map(id => ({ id }))
-            for (const item of items) {
-              const itemCtx: MiddlewareContext = { ...ctx, payload: item }
-              const isOwner = await ownerCheckQuery(itemCtx)
-              if (!isOwner) {
-                throw new HTTPException(403, {
-                  message: `Forbidden: you do not own record ${(item as any).id}`,
-                })
-              }
-            }
-          } else {
-            throw new HTTPException(500, {
-              message: `Misconfiguration: requireOwner with checkOnUpdateDelete=true requires ownerCheckQuery for bulk operations on collection "${ctx.collection}".`,
-            })
-          }
-        }
+      }
+      case 'bulk-update': {
+        const items = payload as { id: string; data: Record<string, unknown> }[]
+        await validateBulkOwnership(ctx, items, ownerCheckQuery, checkOnUpdateDelete, collection)
         break
+      }
+      case 'bulk-delete': {
+        const items = (payload as string[]).map(id => ({ id }))
+        await validateBulkOwnership(ctx, items, ownerCheckQuery, checkOnUpdateDelete, collection)
+        break
+      }
     }
 
     await next()
+  }
+}
+
+function validateItemOwner(
+  item: Record<string, unknown>,
+  ownerField: string,
+  userId: string,
+  action: string
+) {
+  const recordOwner = item[ownerField] as string | undefined
+  if (recordOwner && recordOwner !== userId) {
+    const suffix = action === 'bulk-insert' ? ' in bulk-insert' : ''
+    throw new HTTPException(403, {
+      message: `Forbidden: you can only create your own records (ownerId mismatch${suffix})`,
+    })
+  }
+}
+
+async function validateOwnership(
+  ctx: MiddlewareContext,
+  ownerCheckQuery: RequireOwnerOptions['ownerCheckQuery'],
+  checkOnUpdateDelete: boolean,
+  collection: string
+) {
+  if (!checkOnUpdateDelete) return
+  if (!ownerCheckQuery) {
+    throw new HTTPException(500, {
+      message: `Misconfiguration: requireOwner with checkOnUpdateDelete=true requires ownerCheckQuery for collection "${collection}". Provide a custom ownership verification function.`,
+    })
+  }
+  const isOwner = await ownerCheckQuery(ctx)
+  if (!isOwner) {
+    throw new HTTPException(403, { message: 'Forbidden: you do not own this record' })
+  }
+}
+
+async function validateBulkOwnership(
+  ctx: MiddlewareContext,
+  items: { id: string }[],
+  ownerCheckQuery: RequireOwnerOptions['ownerCheckQuery'],
+  checkOnUpdateDelete: boolean,
+  collection: string
+) {
+  if (!checkOnUpdateDelete) return
+  if (!ownerCheckQuery) {
+    throw new HTTPException(500, {
+      message: `Misconfiguration: requireOwner with checkOnUpdateDelete=true requires ownerCheckQuery for bulk operations on collection "${collection}".`,
+    })
+  }
+  for (const item of items) {
+    const isOwner = await ownerCheckQuery({ ...ctx, payload: item })
+    if (!isOwner) {
+      throw new HTTPException(403, {
+        message: `Forbidden: you do not own record ${item.id}`,
+      })
+    }
   }
 }
 

@@ -2,8 +2,6 @@
 export { ConnectionProvider, useConnectionStatus } from './client/context/ConnectionContext'
 export {
   useCollection,
-  useUserCollection,
-  useUserLiveSync,
   type UseCollectionOptions,
   type UseCollectionResult,
 } from './client/hooks/useCollection'

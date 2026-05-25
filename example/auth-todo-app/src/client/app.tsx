@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useUserCollection, useUserLiveSync, useConnectionStatus } from 'cf-sync-kit'
+import { useCollection, useLiveSync, useConnectionStatus } from 'cf-sync-kit'
 import { collectionsConfig } from '../../shared/schema'
 import { hc } from 'hono/client'
 import type { AppType } from '../server'
@@ -31,9 +31,9 @@ function App() {
 function TodoApp({ currentUser, onLogout }: { currentUser: string; onLogout: () => void }) {
   const { status } = useConnectionStatus()
 
-  useUserLiveSync(currentUser, { party: 'todos' })
+  useLiveSync(currentUser, { party: 'todos' })
 
-  const { data: todos, isLoading, add, update, remove, isAdding, isEntitySaving, addError } = useUserCollection<typeof collectionsConfig, 'todos'>('todos', currentUser)
+  const { data: todos, isLoading, add, update, remove, isAdding, isEntitySaving, addError } = useCollection<typeof collectionsConfig, 'todos'>('todos', currentUser)
   const [newTitle, setNewTitle] = useState('')
 
   const handleAdd = () => {

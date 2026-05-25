@@ -383,18 +383,6 @@ function TodoList() {
 }
 ```
 
-`useUserCollection` and `useUserLiveSync` are convenience hooks that use the `userId` directly as the syncId:
-
-```tsx
-// Instead of:
-useCollection('todos', userId, scope, options)
-useLiveSync(userId, { party: 'main' })
-
-// You can write:
-useUserCollection('todos', userId, scope, options)
-useUserLiveSync(userId, { party: 'main' })
-```
-
 ## API Reference
 
 ### Client (`cf-sync-kit`)
@@ -404,10 +392,7 @@ useUserLiveSync(userId, { party: 'main' })
 | `ConnectionProvider` | React provider for WebSocket connection state |
 | `useConnectionStatus()` | Returns `{ status, isConnected, isConnecting, isDisconnected }` |
 | `useCollection<C, K>(...)` | Generic CRUD hook — types inferred from collection name |
-| `useUserCollection<C, K>(...)` | Convenience hook — uses `userId` directly as syncId |
-| `useUserCollection<C, K>(...)` | Convenience hook — uses `userId` directly as syncId |
 | `useLiveSync(syncId, options?)` | WebSocket sync hook with broadcast handling |
-| `useUserLiveSync(userId, options?)` | Convenience hook — uses `userId` directly as syncId |
 | `defineCollections(config)` | Type-safe config helper — alternative to `as const` |
 | `UseCollectionOptions` | Options interface for useCollection |
 | `UseCollectionResult` | Return type of useCollection hook |
