@@ -15,7 +15,8 @@ export function applyMutationToCache(
   scope: string | undefined,
   action: ActionType,
   payload: unknown,
-  compareUpdatedAt?: (existing: any, incoming: any) => any
+  compareUpdatedAt?: (existing: any, incoming: any) => any,
+  optimisticIds?: string[]
 ): void {
   const targetScope = scope
   const merge = compareUpdatedAt ?? ((existing: any, incoming: any) => ({ ...existing, ...incoming }))
@@ -32,9 +33,12 @@ export function applyMutationToCache(
       switch (action) {
         case 'insert': {
           const item = payload as { id: string }
-          return (oldData as any[]).some((d) => d.id === item.id)
-            ? oldData
-            : [item, ...oldData]
+          const cleaned = optimisticIds
+            ? (oldData as any[]).filter((d) => !optimisticIds.includes(d.id))
+            : oldData
+          return (cleaned as any[]).some((d) => d.id === item.id)
+            ? cleaned
+            : [item, ...cleaned]
         }
         case 'update': {
           const item = payload as { id: string }
@@ -48,9 +52,12 @@ export function applyMutationToCache(
         }
         case 'bulk-insert': {
           const items = payload as any[]
-          const existingIds = new Set((oldData as any[]).map((d) => d.id))
+          const base = optimisticIds
+            ? (oldData as any[]).filter((d) => !optimisticIds.includes(d.id))
+            : oldData
+          const existingIds = new Set((base as any[]).map((d) => d.id))
           const newItems = items.filter((p) => !existingIds.has(p.id))
-          return [...newItems, ...oldData]
+          return [...newItems, ...base]
         }
         case 'bulk-update': {
           const items = payload as any[]

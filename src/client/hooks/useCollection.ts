@@ -319,7 +319,11 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onSuccess: (result, variables, context) => {
       const entity = result.data
       if (!entity) return
-      applyMutationToCache(queryClient, collection, syncId, scope, 'insert', entity)
+      applyMutationToCache(
+        queryClient, collection, syncId, scope, 'insert', entity,
+        undefined,
+        context?.optimisticId ? [context.optimisticId] : undefined
+      )
       log('Add success:', entity)
     },
     onError: (err, variables, context) => {
@@ -476,7 +480,11 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       return { previousData }
     },
     onSuccess: (result, variables, context) => {
-      applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-insert', result.data)
+      applyMutationToCache(
+        queryClient, collection, syncId, scope, 'bulk-insert', result.data,
+        undefined,
+        context?.optimisticIds
+      )
     },
     onError: (err, variables, context) => {
       if (context?.previousData) {
