@@ -272,6 +272,32 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     if (debug) console.error(`[cf-sync-kit] [useCollection:${collection}]`, ...args)
   }, [debug, collection])
 
+  // Shared mutation config
+  const retryConfig = {
+    retry: (failureCount: number, error: SyncError) => failureCount < 3 && isRetryableError(error),
+    retryDelay,
+  }
+
+  const makeOnError = useCallback(
+    (label: string) => (err: SyncError, _variables: any, context?: MutationContext) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKey, context.previousData)
+      }
+      logError(`${label} error:`, err)
+    },
+    [queryClient, queryKey, logError]
+  )
+
+  const makeOnSettled = useCallback(
+    () => (_data: any, _error: any, variables: { _clientMutationId: string }) => {
+      pendingMutationsRef.current.delete(variables._clientMutationId)
+      if (refetchOnSuccess) {
+        queryClient.invalidateQueries({ queryKey })
+      }
+    },
+    [pendingMutationsRef, refetchOnSuccess, queryClient, queryKey]
+  )
+
   const query = useQuery<Entity[]>({
     queryKey,
     queryFn: async () => {
@@ -300,8 +326,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         body: JSON.stringify(body),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -316,7 +341,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       log('Pessimistic add (waiting for server):', variables.data)
       return { previousData }
     },
-    onSuccess: (result, variables, context) => {
+    onSuccess: (result, _variables, context) => {
       const entity = result.data
       if (!entity) return
       applyMutationToCache(
@@ -326,18 +351,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       )
       log('Add success:', entity)
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('Add error:', err)
-    },
-    onSettled: (_data, _error, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) {
-        queryClient.invalidateQueries({ queryKey })
-      }
-    },
+    onError: makeOnError('Add'),
+    onSettled: makeOnSettled(),
   })
 
   const update = useMutation<
@@ -354,8 +369,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         body: JSON.stringify({ ...(data as object), syncId, _clientMutationId, ...(scope !== undefined && { scope }) }),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -382,18 +396,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       applyMutationToCache(queryClient, collection, syncId, scope, 'update', entity)
       log('Update success:', entity)
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('Update error:', err)
-    },
-    onSettled: (_data, _error, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) {
-        queryClient.invalidateQueries({ queryKey })
-      }
-    },
+    onError: makeOnError('Update'),
+    onSettled: makeOnSettled(),
   })
 
   const remove = useMutation<
@@ -413,8 +417,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         headers: getHeaders(),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -437,18 +440,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       applyMutationToCache(queryClient, collection, syncId, scope, 'delete', { id: variables.id })
       log('Remove success:', variables.id)
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('Remove error:', err)
-    },
-    onSettled: (_data, _error, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) {
-        queryClient.invalidateQueries({ queryKey })
-      }
-    },
+    onError: makeOnError('Remove'),
+    onSettled: makeOnSettled(),
   })
 
   const addManyMutation = useMutation<
@@ -466,8 +459,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         body: JSON.stringify(body),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -479,23 +471,15 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       }
       return { previousData }
     },
-    onSuccess: (result, variables, context) => {
+    onSuccess: (result, _variables, context) => {
       applyMutationToCache(
         queryClient, collection, syncId, scope, 'bulk-insert', result.data,
         undefined,
         context?.optimisticIds
       )
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('AddMany error:', err)
-    },
-    onSettled: (_, __, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) queryClient.invalidateQueries({ queryKey })
-    },
+    onError: makeOnError('AddMany'),
+    onSettled: makeOnSettled(),
   })
 
   const updateManyMutation = useMutation<
@@ -513,8 +497,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         body: JSON.stringify(body),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -535,16 +518,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       if (!result.data?.length) return
       applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-update', result.data)
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('UpdateMany error:', err)
-    },
-    onSettled: (_, __, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) queryClient.invalidateQueries({ queryKey })
-    },
+    onError: makeOnError('UpdateMany'),
+    onSettled: makeOnSettled(),
   })
 
   const removeManyMutation = useMutation<
@@ -562,8 +537,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
         body: JSON.stringify(body),
       })
     },
-    retry: (failureCount, error) => failureCount < 3 && isRetryableError(error),
-    retryDelay,
+    ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
@@ -579,52 +553,47 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onSuccess: (_result, variables) => {
       applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-delete', variables.ids)
     },
-    onError: (err, variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
-      logError('RemoveMany error:', err)
-    },
-    onSettled: (_, __, variables) => {
-      pendingMutationsRef.current.delete(variables._clientMutationId)
-      if (refetchOnSuccess) queryClient.invalidateQueries({ queryKey })
-    },
+    onError: makeOnError('RemoveMany'),
+    onSettled: makeOnSettled(),
   })
 
-  const addWithId = useCallback(
-    (payload: Insert, options?: Parameters<typeof add.mutate>[1]) =>
-      add.mutate({ data: payload, _clientMutationId: crypto.randomUUID() }, options),
-    [add]
+  const wrapMutate = useCallback(
+    <T,>(
+      mutate: (vars: any, options?: any) => void,
+      buildVars: (payload: T) => any
+    ) => (payload: T, options?: any) =>
+      mutate({ ...buildVars(payload), _clientMutationId: crypto.randomUUID() }, options),
+    []
   )
 
-  const updateWithId = useCallback(
-    (vars: { id: string; data: Update }, options?: Parameters<typeof update.mutate>[1]) =>
-      update.mutate({ ...vars, _clientMutationId: crypto.randomUUID() }, options),
-    [update]
+  const addWithId = wrapMutate(
+    add.mutate,
+    (payload: Insert) => ({ data: payload })
   )
 
-  const removeWithId = useCallback(
-    (id: string, options?: Parameters<typeof remove.mutate>[1]) =>
-      remove.mutate({ id, _clientMutationId: crypto.randomUUID() }, options),
-    [remove]
+  const updateWithId = wrapMutate(
+    update.mutate,
+    (vars: { id: string; data: Update }) => vars
   )
 
-  const addMany = useCallback(
-    (payloads: Insert[], options?: Parameters<typeof addManyMutation.mutate>[1]) =>
-      addManyMutation.mutate({ items: payloads, _clientMutationId: crypto.randomUUID() }, options),
-    [addManyMutation]
+  const removeWithId = wrapMutate(
+    remove.mutate,
+    (id: string) => ({ id })
   )
 
-  const updateMany = useCallback(
-    (payloads: { id: string; data: Update }[], options?: Parameters<typeof updateManyMutation.mutate>[1]) =>
-      updateManyMutation.mutate({ items: payloads, _clientMutationId: crypto.randomUUID() }, options),
-    [updateManyMutation]
+  const addMany = wrapMutate(
+    addManyMutation.mutate,
+    (payloads: Insert[]) => ({ items: payloads })
   )
 
-  const removeMany = useCallback(
-    (ids: string[], options?: Parameters<typeof removeManyMutation.mutate>[1]) =>
-      removeManyMutation.mutate({ ids, _clientMutationId: crypto.randomUUID() }, options),
-    [removeManyMutation]
+  const updateMany = wrapMutate(
+    updateManyMutation.mutate,
+    (payloads: { id: string; data: Update }[]) => ({ items: payloads })
+  )
+
+  const removeMany = wrapMutate(
+    removeManyMutation.mutate,
+    (ids: string[]) => ({ ids })
   )
 
   return {
