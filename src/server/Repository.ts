@@ -88,23 +88,6 @@ export class Repository<TTable extends AnySQLiteTable> {
   }
 
   /**
-   * Finds a single entity by id, scoped to syncId.
-   */
-  async findById(syncId: string, id: string) {
-    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
-
-    try {
-      let query = this.db.select().from(this.table)
-      if (whereClause) query = query.where(whereClause) as any
-      const results = await query
-      return results[0] || null
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`[Repository.findById] Failed to find entity in ${this.collectionName}: ${message}`)
-    }
-  }
-
-  /**
    * Finds all entities for a sync scope.
    */
   async findAll(syncId: string) {
@@ -283,25 +266,6 @@ export class Repository<TTable extends AnySQLiteTable> {
         const message = error instanceof Error ? error.message : String(error)
         throw new Error(`[Repository.bulkDelete] Failed to delete batch starting at index ${i}: ${message}`)
       }
-    }
-  }
-
-  /**
-   * Finds multiple entities by their ids, scoped to syncId (unless singleTenant mode).
-   */
-  async findByIds(syncId: string, ids: string[]) {
-    if (ids.length === 0) return []
-
-    const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), ids))
-
-    try {
-      let query = this.db.select().from(this.table)
-      if (whereClause) query = query.where(whereClause) as any
-      const results = await query
-      return results
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`[Repository.findByIds] Failed to find entities in ${this.collectionName}: ${message}`)
     }
   }
 }

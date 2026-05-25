@@ -210,7 +210,7 @@ export const collectionsConfig = defineCollections({
 |-----------|--------------------|------------------|
 | `delete` | `DELETE FROM table` | `UPDATE table SET deletedAt = NOW()` |
 | `bulk-delete` | `DELETE FROM table WHERE id IN (...)` | `UPDATE table SET deletedAt = NOW() WHERE id IN (...)` |
-| `findAll` / `findById` / `GET` | Returns all rows | Filters `WHERE deletedAt IS NULL` |
+| `findAll` / `GET` | Returns all rows | Filters `WHERE deletedAt IS NULL` |
 | Client broadcast | `action: 'delete'` | `action: 'delete'` (unchanged) |
 
 **Configuration options:**
@@ -223,7 +223,7 @@ softDeleteColumn: true
 softDeleteColumn: 'archived_at'
 ```
 
-> **Note:** Soft-deleted records are automatically excluded from all read operations (`findAll`, `findById`, `findByIds`, and the `GET /:syncId` REST endpoint). The client UI receives standard `delete` events and removes items from cache — no code changes required on the frontend.
+> **Note:** Soft-deleted records are automatically excluded from `findAll` and the `GET /:syncId` REST endpoint. The client UI receives standard `delete` events and removes items from cache — no code changes required on the frontend.
 
 ### 2. Create your Durable Object
 
