@@ -32,14 +32,12 @@ export const WsEventSchema = z.discriminatedUnion('type', [
 
 /**
  * Event broadcast to all connected clients after a mutation.
- * @template TCollection - Collection name type
- * @template TPayload - Payload type
  */
-export type WsBroadcastEvent<TCollection extends string = string, TPayload = unknown> = {
+export type WsBroadcastEvent = {
   type: 'broadcast'
-  collection: TCollection
+  collection: string
   action: ActionType
-  payload: TPayload
+  payload: unknown
   broadcastId: number
   clientMutationId?: string
   scope?: string
