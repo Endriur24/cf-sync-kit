@@ -2,8 +2,6 @@ import { useRef, useCallback, useEffect } from 'react'
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query'
 import type { CollectionsMap, InferInsert, InferUpdate, InferEntity, PendingMutationInfo } from '../../shared/types'
 import { SyncError, DEFAULT_SYNC_ID } from '../../shared/types'
-import type { UseLiveSyncOptions } from './useLiveSync'
-import { useLiveSync } from './useLiveSync'
 import { applyMutationToCache } from './cacheUpdater'
 import { useLiveSyncRegistrySafe } from '../context/ConnectionContext'
 import { log as debugLog, isDev } from '../../shared/logger'
@@ -634,5 +632,3 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     isMutationPending: (id: string) => pendingMutationsRef.current.has(id),
   }
 }
-
-
