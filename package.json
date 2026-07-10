@@ -1,6 +1,6 @@
 {
   "name": "cf-sync-kit",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "A real-time framework for Cloudflare Workers with Durable Objects, Hono, and React",
   "type": "module",
   "main": "./dist/index.js",
@@ -50,33 +50,40 @@
     "partysocket": ">=1.0.0",
     "react": ">=19.0.0",
     "react-dom": ">=19.0.0",
-    "typescript": ">=5.0.0",
+    "typescript": ">=7.0.0",
     "zod": ">=4.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true },
-    "drizzle-zod": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "drizzle-zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.30.3",
     "@hono/react-renderer": "^1.0.1",
-    "@hono/zod-validator": "^0.7.6",
+    "@hono/zod-validator": "^0.8.0",
     "@tanstack/react-query": "^5.96.1",
-    "@types/node": "^25.5.2",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",
     "hono": "^4.12.9",
-    "partyserver": "^0.4.1",
+    "partyserver": "^0.5.8",
     "partysocket": "^1.1.16",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5.0.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.3",
-    "vite-ssr-components": "^0.5.2",
+    "vite-ssr-components": "^0.6.1",
     "vitest": "^4.1.4",
     "wrangler": "^4.79.0",
     "zod": "^4.3.6"
@@ -98,5 +105,8 @@
     "react",
     "drizzle",
     "typescript"
-  ]
+  ],
+  "overrides": {
+    "@cloudflare/workers-types": "^5.20260710.1"
+  }
 }
