@@ -145,7 +145,7 @@ export interface UseCollectionResult<Entity, Insert, Update> {
  *
  * Supports three calling conventions:
  *
- * **Single-tenant** — collection only, syncId defaults to `'_default'`:
+ * **Single-tenant** — collection only, syncId defaults to `'default'`:
  * @example
  * const { data, add, update, remove } = useCollection<typeof config, 'todos'>('todos')
  *
@@ -166,7 +166,7 @@ export interface UseCollectionResult<Entity, Insert, Update> {
  * const { data } = useCollection<typeof config, 'todos'>('todos', 'project-abc', 'active', { debug: true })
  *
  * @param collection - Collection name (key from your CollectionsMap)
- * @param syncIdOrOptions - Sync ID for multi-tenant isolation, or options object (syncId defaults to `'_default'`)
+ * @param syncIdOrOptions - Sync ID for multi-tenant isolation, or options object (syncId defaults to `'default'`)
  * @param scope - Optional scope for sub-filtering within a sync group
  * @param options - Additional configuration (debug, apiPrefix, refetchOnSuccess, etc.)
  */
@@ -301,8 +301,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     queryFn: async () => {
       log('Fetching data...')
       const path = consistentReads
-        ? `/${collection}/${syncId}?consistent=true`
-        : `/${collection}/${syncId}`
+        ? `/${syncId}/${collection}?consistent=true`
+        : `/${syncId}/${collection}`
 
       const data = await apiFetch<Record<string, Entity[]>>(path, apiPrefix, { headers: getHeaders() })
       return (data[collection] ?? []) as Entity[]
@@ -317,8 +317,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   >({
     mutationFn: async (vars) => {
       const { _clientMutationId, data } = vars
-      const body = { ...data, syncId, _clientMutationId, ...(scope !== undefined && { scope }) }
-      return apiFetch<{ success: boolean; data: Entity }>(`/${collection}`, apiPrefix, {
+      const body = { ...data, _clientMutationId, ...(scope !== undefined && { scope }) }
+      return apiFetch<{ success: boolean; data: Entity }>(`/${syncId}/${collection}`, apiPrefix, {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(body),
@@ -361,10 +361,10 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   >({
     mutationFn: async (vars) => {
       const { id, data, _clientMutationId } = vars
-      return apiFetch<{ success: boolean; data: Entity }>(`/${collection}/${id}`, apiPrefix, {
+      return apiFetch<{ success: boolean; data: Entity }>(`/${syncId}/${collection}/${id}`, apiPrefix, {
         method: 'PUT',
         headers: getHeaders(),
-        body: JSON.stringify({ ...(data as object), syncId, _clientMutationId, ...(scope !== undefined && { scope }) }),
+        body: JSON.stringify({ ...(data as object), _clientMutationId, ...(scope !== undefined && { scope }) }),
       })
     },
     ...retryConfig,
@@ -407,10 +407,9 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     mutationFn: async (vars) => {
       const { id, _clientMutationId } = vars
       const params = new URLSearchParams()
-      params.set('syncId', syncId)
       params.set('_clientMutationId', _clientMutationId)
       if (scope !== undefined) params.set('scope', scope)
-      return apiFetch<{ success: boolean }>(`/${collection}/${id}?${params.toString()}`, apiPrefix, {
+      return apiFetch<{ success: boolean }>(`/${syncId}/${collection}/${id}?${params.toString()}`, apiPrefix, {
         method: 'DELETE',
         headers: getHeaders(),
       })
@@ -450,8 +449,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   >({
     mutationFn: async (vars) => {
       const { items, _clientMutationId } = vars
-      const body = { items, syncId, _clientMutationId, ...(scope !== undefined && { scope }) }
-      return apiFetch<{ success: true; data: Entity[] }>(`/${collection}/bulk`, apiPrefix, {
+      const body = { items, _clientMutationId, ...(scope !== undefined && { scope }) }
+      return apiFetch<{ success: true; data: Entity[] }>(`/${syncId}/${collection}/bulk`, apiPrefix, {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(body),
@@ -488,8 +487,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   >({
     mutationFn: async (vars) => {
       const { items, _clientMutationId } = vars
-      const body = { items, syncId, _clientMutationId, ...(scope !== undefined && { scope }) }
-      return apiFetch<{ success: true; data: Entity[] }>(`/${collection}/bulk`, apiPrefix, {
+      const body = { items, _clientMutationId, ...(scope !== undefined && { scope }) }
+      return apiFetch<{ success: true; data: Entity[] }>(`/${syncId}/${collection}/bulk`, apiPrefix, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(body),
@@ -528,8 +527,8 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   >({
     mutationFn: async (vars) => {
       const { ids, _clientMutationId } = vars
-      const body = { ids, syncId, _clientMutationId, ...(scope !== undefined && { scope }) }
-      return apiFetch<{ success: true }>(`/${collection}/bulk`, apiPrefix, {
+      const body = { ids, _clientMutationId, ...(scope !== undefined && { scope }) }
+      return apiFetch<{ success: true }>(`/${syncId}/${collection}/bulk`, apiPrefix, {
         method: 'DELETE',
         headers: getHeaders(),
         body: JSON.stringify(body),

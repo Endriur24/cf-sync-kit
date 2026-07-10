@@ -223,7 +223,7 @@ softDeleteColumn: true
 softDeleteColumn: 'archived_at'
 ```
 
-> **Note:** Soft-deleted records are automatically excluded from `findAll` and the `GET /:syncId` REST endpoint. The client UI receives standard `delete` events and removes items from cache — no code changes required on the frontend.
+> **Note:** Soft-deleted records are automatically excluded from `findAll` and the `GET /:syncId/:collection` REST endpoint. The client UI receives standard `delete` events and removes items from cache — no code changes required on the frontend.
 
 ### 2. Create your Durable Object
 
@@ -341,6 +341,34 @@ app.route('/api', syncApi)
 
 export default app
 ```
+
+### REST Endpoints
+
+`createSyncApi` exposes all collections under a single tenant prefix:
+
+**Multi-tenant** (`syncId` from your app, e.g. `my-project`):
+```
+GET    /api/:syncId/:collection
+POST   /api/:syncId/:collection
+PUT    /api/:syncId/:collection/:id
+DELETE /api/:syncId/:collection/:id
+POST   /api/:syncId/:collection/bulk
+PUT    /api/:syncId/:collection/bulk
+DELETE /api/:syncId/:collection/bulk
+```
+
+**Single-tenant** (`singleTenant: true`) uses the literal `default` tenant:
+```
+GET    /api/default/:collection
+POST   /api/default/:collection
+PUT    /api/default/:collection/:id
+DELETE /api/default/:collection/:id
+POST   /api/default/:collection/bulk
+PUT    /api/default/:collection/bulk
+DELETE /api/default/:collection/bulk
+```
+
+The client hooks (`useCollection`, `useLiveSync`) automatically use the correct URLs. For single-tenant apps you can omit `syncId` entirely — it defaults to `'default'`.
 
 ### 4. Use in your React app
 
@@ -595,8 +623,7 @@ interface UseLiveSyncOptions {
 | `createGetRoomFn(namespace)` | **Factory** — creates typed room resolver |
 | `DurableObjectBase` | Base class for custom Durable Objects |
 | `Repository` | CRUD operations for a Drizzle table |
-| `createSyncApi(collections, getRoom, options?)` | Creates Hono router with sync endpoints |
-| `createCollectionRouter(...)` | Creates router for a single collection |
+| `createSyncApi(collections, getRoom, options?)` | Creates Hono app with `/:syncId/:collection` sync endpoints |
 | `MiddlewareSystem` | Middleware chain manager |
 | `createAuthMiddleware(getUserId)` | Authentication middleware |
 | `createLoggingMiddleware()` | Mutation logging |
@@ -611,7 +638,7 @@ interface UseLiveSyncOptions {
 | `Middleware` | Middleware function type |
 | `RoomMutator` | Interface for DO room mutation methods |
 | `GetRoomFn` | Type for room resolver function |
-| `CollectionRouterOptions` | Options for createCollectionRouter / createSyncApi (includes `dbName` for custom D1 binding) |
+| `CollectionRouterOptions` | Options for `createSyncApi` (includes `dbName` for custom D1 binding) |
 
 ### Shared Types
 
@@ -953,7 +980,7 @@ this.use(async (ctx, next) => {
 
 ## Consistent Reads
 
-By default, `GET /:syncId` reads directly from D1 for performance. This can cause eventual consistency issues after Durable Object hibernation. Enable `consistentReads` to route reads through the DO:
+By default, `GET /:syncId/:collection` reads directly from D1 for performance. This can cause eventual consistency issues after Durable Object hibernation. Enable `consistentReads` to route reads through the DO:
 
 ```ts
 const syncApi = createSyncApi(collectionsConfig, getRoom, {

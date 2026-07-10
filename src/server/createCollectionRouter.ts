@@ -1,15 +1,14 @@
-import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and, isNull } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
+import type { Context } from 'hono'
 import { isDev } from '../shared/logger'
 import { DEFAULT_SYNC_ID } from '../shared/types'
 
 const syncMetaSchema = z.object({
-  syncId: z.string().min(1).optional(),
   _clientMutationId: z.string().optional(),
   scope: z.string().optional(),
 })
@@ -36,7 +35,7 @@ export interface RoomMutator {
 export type GetRoomFn = (env: Bindings, syncId: string) => RoomMutator
 
 /**
- * Configuration options for createCollectionRouter.
+ * Configuration options for createCollectionHandlers / createSyncApi.
  */
 export interface CollectionRouterOptions {
   /**
@@ -58,11 +57,12 @@ export interface CollectionRouterOptions {
    */
   validateSyncAccess?: (userId: string, syncId: string) => void | Promise<void>
   /**
-   * Name of the Drizzle table column used as sync/tenant ID (default: "syncId")
+   * Name of the Drizzle table column used as sync/tenant ID (default: "syncId").
+   * Ignored when singleTenant is true.
    */
   syncIdColumn?: string
   /**
-   * When true, syncId is optional in requests. Uses '_default' as the internal syncId.
+   * When true, syncId is optional in requests. Uses DEFAULT_SYNC_ID as the internal syncId.
    * Suitable for single-tenant applications where all data is shared.
    * @default false
    */
@@ -80,8 +80,26 @@ export interface CollectionRouterOptions {
 }
 
 /**
- * Creates a Hono router with CRUD endpoints for a collection.
- * Routes: GET /:syncId?, POST /, PUT /:id, DELETE /:id, POST /bulk, PUT /bulk, DELETE /bulk
+ * Handlers returned by createCollectionHandlers. Each handler expects
+ * to be mounted at `/:syncId/:collection/...` by createSyncApi.
+ */
+export interface CollectionHandlers {
+  getAll: (c: Context) => Promise<Response>
+  create: (c: Context) => Promise<Response>
+  update: (c: Context) => Promise<Response>
+  remove: (c: Context) => Promise<Response>
+  bulkCreate: (c: Context) => Promise<Response>
+  bulkUpdate: (c: Context) => Promise<Response>
+  bulkDelete: (c: Context) => Promise<Response>
+}
+
+  // zValidator is invoked manually inside handlers, so TypeScript cannot infer
+  // validated data on the context. Use a small helper to read it back.
+  const getValidated = (c: Context, target: 'json' | 'query'): any => (c.req.valid as any)(target)
+
+/**
+ * Creates handlers for a single collection. The handlers are not a Hono router;
+ * createSyncApi mounts them at `/:syncId/:collection/...`.
  *
  * @param collection - Collection name
  * @param table - Drizzle table definition
@@ -89,16 +107,16 @@ export interface CollectionRouterOptions {
  * @param updateSchema - Zod schema for update validation
  * @param getRoom - Function to resolve the Durable Object room
  * @param options - Optional router configuration
- * @returns Hono router with collection endpoints
+ * @returns Object with handler functions for createSyncApi
  */
-export function createCollectionRouter(
+export function createCollectionHandlers(
   collection: string,
   table: AnySQLiteTable,
   insertSchema: z.ZodType,
   updateSchema: z.ZodType,
   getRoom: GetRoomFn,
   options?: CollectionRouterOptions
-) {
+): CollectionHandlers {
   const consistentReads = options?.consistentReads ?? false
   const getUserId = options?.getUserId
   const validateSyncAccess = options?.validateSyncAccess
@@ -120,11 +138,11 @@ export function createCollectionRouter(
     }
   }
 
-  const ensureAccess = async (c: any, syncId: string) => {
+  const ensureAccess = async (c: Context, syncId: string) => {
     const userId = getUserId
       ? getUserId(c)
-      : (c.get('userId') as string | undefined)
-        ?? (c.get('username') as string | undefined)
+      : (c.get('userId' as never) as string | undefined)
+        ?? (c.get('username' as never) as string | undefined)
 
     if (validateSyncAccess) {
       if (!userId) {
@@ -139,153 +157,158 @@ export function createCollectionRouter(
   }
 
   const extractMeta = (body: Record<string, unknown>) => {
-    const { syncId, _clientMutationId, scope, ...data } = body
+    const { _clientMutationId, scope, ...data } = body
     return {
-      syncId: resolveSyncId(syncId as string | undefined),
       _clientMutationId: _clientMutationId as string | undefined,
       scope: scope as string | undefined,
       data,
     }
   }
 
-  const route = new Hono<{ Bindings: Bindings }>({ strict: false })
+  const getSyncIdFromParam = (c: Context) => {
+    const syncId = c.req.param('syncId')
+    return resolveSyncId(syncId)
+  }
 
-  route.get('/:syncId?', async (c) => {
-    const syncId = resolveSyncId(c.req.param('syncId'))
-    const consistent = c.req.query('consistent') === 'true'
-    await ensureAccess(c, syncId)
+  return {
+    getAll: async (c: Context) => {
+      const syncId = getSyncIdFromParam(c)
+      const consistent = c.req.query('consistent') === 'true'
+      await ensureAccess(c, syncId)
 
-    if (consistent || consistentReads) {
+      if (consistent || consistentReads) {
+        const room = getRoom(c.env, syncId)
+        if (room.findAll) {
+          return c.json({ [collection]: await room.findAll(collection, syncId) })
+        }
+        console.debug(
+          `[cf-sync-kit] consistentReads requested but findAll not available for "${collection}". Falling back to direct D1 read.`
+        )
+      }
+
+      try {
+        const db = drizzle(c.env[dbName as keyof typeof c.env] as D1Database)
+        const conditions = []
+
+        if (!singleTenant) conditions.push(eq((table as any)[syncIdColumn], syncId))
+        if (softDeleteCol) conditions.push(isNull((table as any)[softDeleteCol]))
+
+        let query = db.select().from(table)
+        if (conditions.length === 1) {
+          query = query.where(conditions[0]) as any
+        } else if (conditions.length > 1) {
+          query = query.where(and(...conditions)) as any
+        }
+
+        const results = await query
+        return c.json({ [collection]: results })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(`[cf-sync-kit] D1 error in GET /${collection}:`, message)
+        throw new HTTPException(500, { message: `Failed to fetch ${collection}: ${message}` })
+      }
+    },
+
+    create: async (c: Context) => {
+      await zValidator('json', insertSchema.and(syncMetaSchema))(c, async () => {})
+      const body = getValidated(c, 'json')
+      const syncId = getSyncIdFromParam(c)
+      const { _clientMutationId, scope, data } = extractMeta(body)
+      const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
-      if (room.findAll) {
-        return c.json({ [collection]: await room.findAll(collection, syncId) })
-      }
-      console.debug(
-        `[cf-sync-kit] consistentReads requested but findAll not available for "${collection}". Falling back to direct D1 read.`
-      )
-    }
+      // Inject ownerId on the backend — never trust client-provided owner fields
+      // scope is always preserved for broadcast filtering
+      const payload = singleTenant
+        ? scope ? { ...data, scope } : { ...data }
+        : scope ? { ...data, scope, ownerId: userId } : { ...data, ownerId: userId }
+      const result = await room.mutate(collection, 'insert', syncId, payload, _clientMutationId, scope, userId)
+      return c.json({ success: true, data: result })
+    },
 
-    try {
-      const db = drizzle(c.env[dbName as keyof typeof c.env] as D1Database)
-      const conditions = []
-
-      if (!singleTenant) conditions.push(eq((table as any)[syncIdColumn], syncId))
-      if (softDeleteCol) conditions.push(isNull((table as any)[softDeleteCol]))
-
-      let query = db.select().from(table)
-      if (conditions.length === 1) {
-        query = query.where(conditions[0]) as any
-      } else if (conditions.length > 1) {
-        query = query.where(and(...conditions)) as any
-      }
-
-      const results = await query
-      return c.json({ [collection]: results })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error(`[cf-sync-kit] D1 error in GET /${collection}:`, message)
-      throw new HTTPException(500, { message: `Failed to fetch ${collection}: ${message}` })
-    }
-  })
-
-  route.post('/', zValidator('json', insertSchema.and(syncMetaSchema)), async (c) => {
-    const body = c.req.valid('json')
-    const { syncId, _clientMutationId, scope, data } = extractMeta(body)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
-    // Inject ownerId on the backend — never trust client-provided owner fields
-    // scope is always preserved for broadcast filtering
-    const payload = singleTenant
-      ? scope ? { ...data, scope } : { ...data }
-      : scope ? { ...data, scope, ownerId: userId } : { ...data, ownerId: userId }
-    const result = await room.mutate(collection, 'insert', syncId, payload, _clientMutationId, scope, userId)
-    return c.json({ success: true, data: result })
-  })
-
-  route.put('/bulk', zValidator('json', bulkUpdateSchema(updateSchema)), async (c) => {
-    const body = c.req.valid('json')
-    const { syncId: rawSyncId, _clientMutationId, scope, items } = body
-    const syncId = resolveSyncId(rawSyncId)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
-
-    console.debug(`[cf-sync-kit] bulk-update "${collection}" for syncId="${syncId}": ${items.length} items`)
-
-    const payload = items.map(({ id, data }) => {
+    update: async (c: Context) => {
+      await zValidator('json', updateSchema.and(syncMetaSchema))(c, async () => {})
+      const { id } = c.req.param()
+      const body = getValidated(c, 'json')
+      const syncId = getSyncIdFromParam(c)
+      const { _clientMutationId, scope, data } = extractMeta(body)
+      const userId = await ensureAccess(c, syncId)
+      const room = getRoom(c.env, syncId)
       // Strip ownerId from update payload — never trust client-provided owner fields
       const { ownerId: _stripped, ...cleanData } = data as Record<string, unknown>
-      return {
-        id,
-        data: scope ? { ...cleanData, scope } : cleanData,
-      }
-    })
+      const payload = scope ? { ...cleanData, scope } : cleanData
+      const result = await room.mutate(collection, 'update', syncId, { id, data: payload }, _clientMutationId, scope, userId)
+      return c.json({ success: true, data: result })
+    },
 
-    const result = await room.mutate(collection, 'bulk-update', syncId, payload, _clientMutationId, scope, userId)
-    return c.json({ success: true, data: result })
-  })
+    remove: async (c: Context) => {
+      await zValidator('query', syncMetaSchema)(c, async () => {})
+      const { id } = c.req.param()
+      const { _clientMutationId, scope } = getValidated(c, 'query')
+      const syncId = getSyncIdFromParam(c)
+      const userId = await ensureAccess(c, syncId)
+      const room = getRoom(c.env, syncId)
+      await room.mutate(collection, 'delete', syncId, { id }, _clientMutationId, scope, userId)
+      return c.json({ success: true })
+    },
 
-  route.put('/:id', zValidator('json', updateSchema.and(syncMetaSchema)), async (c) => {
-    const { id } = c.req.param()
-    const body = c.req.valid('json')
-    const { syncId, _clientMutationId, scope, data } = extractMeta(body)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
-    // Strip ownerId from update payload — never trust client-provided owner fields
-    const { ownerId: _stripped, ...cleanData } = data as Record<string, unknown>
-    const payload = scope ? { ...cleanData, scope } : cleanData
-    const result = await room.mutate(collection, 'update', syncId, { id, data: payload }, _clientMutationId, scope, userId)
-    return c.json({ success: true, data: result })
-  })
+    bulkCreate: async (c: Context) => {
+      await zValidator('json', bulkInsertSchema(insertSchema))(c, async () => {})
+      const body = getValidated(c, 'json')
+      const syncId = getSyncIdFromParam(c)
+      const { _clientMutationId, scope, items } = body
+      const userId = await ensureAccess(c, syncId)
+      const room = getRoom(c.env, syncId)
 
-  route.delete('/bulk', zValidator('json', bulkDeleteSchema), async (c) => {
-    const { syncId: rawSyncId, _clientMutationId, scope, ids } = c.req.valid('json')
-    const syncId = resolveSyncId(rawSyncId)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
+      console.debug(`[cf-sync-kit] bulk-insert "${collection}" for syncId="${syncId}": ${items.length} items`)
 
-    console.debug(`[cf-sync-kit] bulk-delete "${collection}" for syncId="${syncId}": ${ids.length} items`)
-
-    await room.mutate(collection, 'bulk-delete', syncId, ids, _clientMutationId, scope, userId)
-    return c.json({ success: true })
-  })
-
-  route.post('/bulk', zValidator('json', bulkInsertSchema(insertSchema)), async (c) => {
-    const body = c.req.valid('json')
-    const { syncId: rawSyncId, _clientMutationId, scope, items } = body
-    const syncId = resolveSyncId(rawSyncId)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
-
-    console.debug(`[cf-sync-kit] bulk-insert "${collection}" for syncId="${syncId}": ${items.length} items`)
-
-    const payload = items.map(item => ({
-      ...(item as object),
-      ...(scope && { scope }),
-      ...(!singleTenant && { ownerId: userId })
-    }))
-
-    const result = await room.mutate(collection, 'bulk-insert', syncId, payload, _clientMutationId, scope, userId)
-    return c.json({ success: true, data: result })
-  })
-
-  // Use query params for DELETE — some reverse proxies (nginx, AWS ALB) strip body from DELETE requests
-  route.delete('/:id', zValidator('query', syncMetaSchema), async (c) => {
-    const { id } = c.req.param()
-    const { syncId: rawSyncId, _clientMutationId, scope } = c.req.valid('query')
-
-    // In multi-tenant mode, syncId is required for tenant isolation
-    if (!singleTenant && !rawSyncId) {
-      throw new HTTPException(400, {
-        message: 'syncId query parameter is required for multi-tenant mode',
+      const payload = (items as Record<string, unknown>[]).map(item => {
+        const { ownerId: _stripped, ...cleanItem } = item
+        return {
+          ...cleanItem,
+          ...(scope && { scope }),
+          ...(!singleTenant && { ownerId: userId })
+        }
       })
-    }
 
-    const syncId = resolveSyncId(rawSyncId)
-    const userId = await ensureAccess(c, syncId)
-    const room = getRoom(c.env, syncId)
-    await room.mutate(collection, 'delete', syncId, { id }, _clientMutationId, scope, userId)
-    return c.json({ success: true })
-  })
+      const result = await room.mutate(collection, 'bulk-insert', syncId, payload, _clientMutationId, scope, userId)
+      return c.json({ success: true, data: result })
+    },
 
-  return route
+    bulkUpdate: async (c: Context) => {
+      await zValidator('json', bulkUpdateSchema(updateSchema))(c, async () => {})
+      const body = getValidated(c, 'json')
+      const syncId = getSyncIdFromParam(c)
+      const { _clientMutationId, scope, items } = body
+      const userId = await ensureAccess(c, syncId)
+      const room = getRoom(c.env, syncId)
+
+      console.debug(`[cf-sync-kit] bulk-update "${collection}" for syncId="${syncId}": ${items.length} items`)
+
+      const payload = (items as { id: string; data: Record<string, unknown> }[]).map(({ id, data }) => {
+        // Strip ownerId from update payload — never trust client-provided owner fields
+        const { ownerId: _stripped, ...cleanData } = data
+        return {
+          id,
+          data: scope ? { ...cleanData, scope } : cleanData,
+        }
+      })
+
+      const result = await room.mutate(collection, 'bulk-update', syncId, payload, _clientMutationId, scope, userId)
+      return c.json({ success: true, data: result })
+    },
+
+    bulkDelete: async (c: Context) => {
+      await zValidator('json', bulkDeleteSchema)(c, async () => {})
+      const body = getValidated(c, 'json')
+      const syncId = getSyncIdFromParam(c)
+      const { _clientMutationId, scope, ids } = body
+      const userId = await ensureAccess(c, syncId)
+      const room = getRoom(c.env, syncId)
+
+      console.debug(`[cf-sync-kit] bulk-delete "${collection}" for syncId="${syncId}": ${ids.length} items`)
+
+      await room.mutate(collection, 'bulk-delete', syncId, ids, _clientMutationId, scope, userId)
+      return c.json({ success: true })
+    },
+  }
 }

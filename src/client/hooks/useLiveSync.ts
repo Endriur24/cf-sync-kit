@@ -88,7 +88,7 @@ export interface UseLiveSyncOptions {
  * Best practice: Call useLiveSync once at the app/layout level for each
  * unique syncId, rather than in individual components.
  *
- * @param syncId - Sync ID (also used as the WebSocket room name). Optional for single-tenant apps (default: '_default')
+ * @param syncId - Sync ID (also used as the WebSocket room name). Optional for single-tenant apps (default: 'default')
  * @param optionsOrScope - Options object or scope string (legacy)
  *
  * @example

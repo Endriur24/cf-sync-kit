@@ -3,7 +3,7 @@ import type { z } from 'zod'
 /**
  * Default sync ID used for single-tenant apps where no explicit syncId is provided.
  */
-export const DEFAULT_SYNC_ID = '_default' as const
+export const DEFAULT_SYNC_ID = 'default' as const
 
 /**
  * Supported mutation action types for collections.
