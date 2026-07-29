@@ -25,9 +25,7 @@ export function applyMutationToCache(
     [collection, syncId, targetScope],
     (oldData) => {
       if (!oldData) {
-        if (action === 'insert') return [payload]
-        if (action === 'bulk-insert') return payload as unknown[]
-        return []
+        return undefined
       }
 
       switch (action) {
