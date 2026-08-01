@@ -41,6 +41,7 @@ export const collectionsConfig = {
   },
   scopedTodos: {
     table: scopedTodosTable,
+    scopeColumn: 'scope', // Explicitly specified (optional when column is named 'scope', but allows custom column names like 'list_id')
     insertSchema: createInsertSchema(scopedTodosTable).omit({ id: true, createdAt: true }),
     updateSchema: createInsertSchema(scopedTodosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(scopedTodosTable),

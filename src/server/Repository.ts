@@ -23,6 +23,7 @@ type DynamicInsertValue = Record<string, unknown>
 export class Repository<TTable extends AnySQLiteTable> {
   protected db: DrizzleD1Database
   public readonly syncIdColumn: string
+  public readonly scopeColumn: string
   public readonly singleTenant: boolean
   public readonly autoTimestamp: boolean
   public readonly softDeleteColumn: string | null
@@ -35,6 +36,7 @@ export class Repository<TTable extends AnySQLiteTable> {
    * @param singleTenant - When true, syncIdColumn is ignored and data is not scoped
    * @param autoTimestamp - When true, automatically sets createdAt/updatedAt timestamps (default: true)
    * @param softDeleteColumn - Name of the column for soft-delete or `true` to use "deletedAt"
+   * @param scopeColumn - Name of the column used for scope filtering (default: "scope")
    */
   constructor(
     d1: D1Database,
@@ -43,18 +45,23 @@ export class Repository<TTable extends AnySQLiteTable> {
     syncIdColumn = 'syncId',
     singleTenant = false,
     autoTimestamp = true,
-    softDeleteColumn?: string | boolean
+    softDeleteColumn?: string | boolean,
+    scopeColumn = 'scope'
   ) {
     this.db = drizzle(d1)
     this.syncIdColumn = syncIdColumn
+    this.scopeColumn = scopeColumn
     this.singleTenant = singleTenant
     this.autoTimestamp = autoTimestamp
     this.softDeleteColumn = typeof softDeleteColumn === 'string' ? softDeleteColumn : (softDeleteColumn ? 'deletedAt' : null)
   }
 
-  private buildWhere(syncId: string, additionalCondition?: any) {
+  private buildWhere(syncId: string, additionalCondition?: any, scope?: string) {
     const conditions = []
     if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
+    if (scope && this.scopeColumn in (this.table as any)) {
+      conditions.push(eq(getTableColumn(this.table, this.scopeColumn), scope))
+    }
     if (additionalCondition) conditions.push(additionalCondition)
     if (this.softDeleteColumn) conditions.push(isNull(getTableColumn(this.table, this.softDeleteColumn)))
 
@@ -88,11 +95,11 @@ export class Repository<TTable extends AnySQLiteTable> {
   }
 
   /**
-   * Finds all entities for a sync scope.
+   * Finds all entities for a sync scope and optional sub-scope.
    */
-  async findAll(syncId: string) {
+  async findAll(syncId: string, scope?: string) {
     try {
-      const results = await this.db.select().from(this.table).where(this.buildWhere(syncId))
+      const results = await this.db.select().from(this.table).where(this.buildWhere(syncId, undefined, scope))
       return results || []
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

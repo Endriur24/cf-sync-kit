@@ -173,4 +173,19 @@ describe('createSyncApi route structure', () => {
     expect(getRoom).toHaveBeenCalledWith(mockEnv, DEFAULT_SYNC_ID)
     expect(room.findAll).toHaveBeenCalledWith('todos', DEFAULT_SYNC_ID)
   })
+
+  it('GET /:syncId/:collection passes scope query parameter to room.findAll when provided', async () => {
+    const room = createMockRoom()
+    const getRoom = vi.fn().mockReturnValue(room)
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema, selectSchema } },
+      getRoom,
+      { consistentReads: true }
+    )
+
+    const res = await api.request('/tenant/todos?consistent=true&scope=list-123', {}, mockEnv)
+    expect(res.status).toBe(200)
+    expect(getRoom).toHaveBeenCalledWith(mockEnv, 'tenant')
+    expect(room.findAll).toHaveBeenCalledWith('todos', 'tenant', 'list-123')
+  })
 })

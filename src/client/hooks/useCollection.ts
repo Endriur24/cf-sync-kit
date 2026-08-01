@@ -300,9 +300,11 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     queryKey,
     queryFn: async () => {
       log('Fetching data...')
-      const path = consistentReads
-        ? `/${syncId}/${collection}?consistent=true`
-        : `/${syncId}/${collection}`
+      const params = new URLSearchParams()
+      if (consistentReads) params.set('consistent', 'true')
+      if (scope !== undefined) params.set('scope', scope)
+      const queryString = params.toString() ? `?${params.toString()}` : ''
+      const path = `/${syncId}/${collection}${queryString}`
 
       const data = await apiFetch<Record<string, Entity[]>>(path, apiPrefix, { headers: getHeaders() })
       return (data[collection] ?? []) as Entity[]

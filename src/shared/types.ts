@@ -29,6 +29,8 @@ export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity
 
   /** Name of the Drizzle table column used as sync/tenant ID (default: "syncId") */
   syncIdColumn?: string
+  /** Name of the Drizzle table column used for scope filtering (default: "scope") */
+  scopeColumn?: string
   /** When true, syncIdColumn is ignored and all data is shared (no multi-tenant isolation) */
   singleTenant?: boolean
   /** When true, automatically sets createdAt/updatedAt timestamps (default: true) */

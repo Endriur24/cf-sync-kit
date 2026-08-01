@@ -8,7 +8,7 @@ A real-time synchronization framework for Cloudflare Workers with Durable Object
 - **Optimistic updates** with automatic rollback on failure (TanStack Query)
 - **Type-safe** CRUD operations inferred from Drizzle + Zod schemas
 - **Multi-tenant isolation** via syncId scoping
-- **Scope filtering** for shared WebSocket/DO isolation
+- **Scope filtering** for shared WebSocket/DO isolation and targeted server-side D1 SQL queries
 - **Middleware system** for auth, logging
 - **Health check endpoint** for monitoring (`GET /health`)
 - **Request timeout** (10s) with structured `TIMEOUT_ERROR` handling
@@ -124,6 +124,15 @@ syncIdColumn: 'project_id'
 
 // Per-tenant model
 syncIdColumn: 'tenant_id'
+```
+
+#### scopeColumn
+
+By default, scope filtering looks for a column named `scope`. Use `scopeColumn` in collection config or router options to specify a custom column name (e.g. `list_id`, `category_id`). Initial `GET` requests append `?scope=...` to execute targeted SQL queries in Cloudflare D1 (`WHERE scope = ?`), preventing full table reads and saving D1 Read Units.
+
+```ts
+// Custom scope column name
+scopeColumn: 'list_id'
 ```
 
 #### Single-Tenant Mode
@@ -645,7 +654,7 @@ interface UseLiveSyncOptions {
 | Type | Description |
 |------|-------------|
 | `ActionType` | `'insert' \| 'update' \| 'delete' \| 'bulk-insert' \| 'bulk-update' \| 'bulk-delete'` |
-| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, singleTenant) |
+| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, scopeColumn, singleTenant) |
 | `CollectionsMap` | Map of collection names to configs |
 | `InferInsert<C, K>` | Infer insert type from collection config |
 | `InferUpdate<C, K>` | Infer update type from collection config |
@@ -995,16 +1004,21 @@ const syncApi = createSyncApi(collectionsConfig, getRoom, {
 
 ## Scope Feature
 
-Scopes allow multiple logical groups to share the same WebSocket and Durable Object without cross-contamination of updates.
+Scopes allow multiple logical sub-groups (e.g. todo lists, channels, categories) to share the same WebSocket connection and Durable Object instance while maintaining isolated data fetching and real-time broadcasts.
+
+When `scope` is specified in `useCollection(collectionName, syncId, scope)`:
+
+1. **Server-Side D1 SQL Filtering**: Initial `GET` requests append `?scope=...` to query parameters. The server executes a targeted SQL query (`WHERE scope = ?`) in Cloudflare D1, returning only records belonging to that scope — saving D1 Read Units and reducing payload size.
+2. **Real-Time Broadcast Isolation**: WebSocket messages carry the `scope` property. Clients automatically filter out real-time events for other scopes, preventing unnecessary React Query cache invalidation and component re-renders.
 
 ```ts
-// Client: each list gets its own scope
+// Client: each list / subpage fetches only its targeted scope data
 useLiveSync()
-useCollection('todos', undefined, listIdA)
-useCollection('todos', undefined, listIdB)
+useCollection('scopedTodos', undefined, listIdA) // GET /default/scopedTodos?scope=listIdA
+useCollection('scopedTodos', undefined, listIdB) // GET /default/scopedTodos?scope=listIdB
 ```
 
-> **Tip:** When using scopes with foreign keys (e.g. `scope` references `lists.id`), use the raw ID as the scope value — not a prefixed string. This ensures the FK constraint is satisfied.
+> **Tip:** When using scopes with foreign keys (e.g. `scope` references `lists.id`), use the raw ID as the scope value — not a prefixed string. This ensures the FK constraint is satisfied. You can customize the column name using `scopeColumn` in collection config.
 
 ## Performance & Consistency Trade-offs
 

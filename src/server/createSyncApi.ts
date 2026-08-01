@@ -95,6 +95,7 @@ export function createSyncApi(
       {
         ...options,
         syncIdColumn: config.syncIdColumn ?? options?.syncIdColumn ?? 'syncId',
+        scopeColumn: (config as any).scopeColumn ?? options?.scopeColumn ?? 'scope',
         singleTenant: (config as any).singleTenant ?? options?.singleTenant ?? false,
         softDeleteColumn: (config as any).softDeleteColumn ?? (options as any)?.softDeleteColumn
       }

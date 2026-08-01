@@ -189,12 +189,12 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   }
 
   /**
-   * Finds all entities in a collection for a sync scope.
+   * Finds all entities in a collection for a sync scope and optional sub-scope.
    */
-  async findAll(collection: string, syncId: string) {
+  async findAll(collection: string, syncId: string, scope?: string) {
     const repo = this.repositories.get(collection)
     if (!repo) throw new HTTPException(400, { message: `Collection ${collection} not registered` })
-    return repo.findAll(syncId)
+    return repo.findAll(syncId, scope)
   }
 
   /**

@@ -4,22 +4,23 @@ Demonstrates scope-based broadcast isolation with `cf-sync-kit`. Multiple collec
 
 ## Features
 
-- **Scope-based broadcast isolation**: Changes in one scope do NOT trigger updates in other scopes
-- **Shared WebSocket & Durable Object**: Multiple scopes use the same infrastructure but have isolated broadcasts
+- **Server-side scope filtering**: Requests like `GET /default/scopedTodos?scope=list-123` execute targeted SQL queries in Cloudflare D1 (`WHERE scope = ?`), reading only the requested scope's rows and saving D1 Read Units!
+- **Scope-based broadcast isolation**: Real-time changes in one scope do NOT trigger updates in other scopes
+- **Shared WebSocket & Durable Object**: Multiple scopes use the same infrastructure but have isolated broadcasts and queries
 - **Multiple collections**: `lists` and `scopedTodos` collections working together
-- **Dynamic scope creation**: Scopes are created at runtime (each list gets its own scope)
-- **Single-tenant configuration**: All data is shared, but broadcasts are scoped
+- **Dynamic scope subpages**: Each list opens a dedicated subpage/view scoped to its listId
+- **Single-tenant configuration**: All data is shared, but query fetching and broadcasts are scoped
 
 ## Key Functions Demonstrated
 
 ### Client-side
-- `useCollection(collectionName, undefined, scope)` - Hook with scope parameter for scoped broadcasts
+- `useCollection(collectionName, undefined, scope)` - Hook with scope parameter for server-side SQL filtering (`GET ?scope=...`) and scoped broadcasts
 - `useLiveSync` - Real-time sync respecting scope boundaries
 - `useConnectionStatus` - Connection state tracking
 
 ### Server-side
 - `createDurableObject` - Single Durable Object handling multiple scopes
-- Scope column in database for broadcast isolation
+- Scope column in D1 database for server-side SQL query filtering and broadcast isolation
 - Foreign key relationships with CASCADE delete
 
 ## Database Setup

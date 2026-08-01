@@ -26,7 +26,7 @@ const bulkDeleteSchema = syncMetaSchema.extend({ ids: z.array(z.string()).min(1)
  */
 export interface RoomMutator {
   mutate(collection: string, action: string, syncId: string, payload: unknown, clientMutationId?: string, scope?: string, userId?: string): Promise<unknown>
-  findAll?(collection: string, syncId: string): Promise<unknown[]>
+  findAll?(collection: string, syncId: string, scope?: string): Promise<unknown[]>
 }
 
 /**
@@ -61,6 +61,10 @@ export interface CollectionRouterOptions {
    * Ignored when singleTenant is true.
    */
   syncIdColumn?: string
+  /**
+   * Name of the Drizzle table column used for scope filtering (default: "scope").
+   */
+  scopeColumn?: string
   /**
    * When true, syncId is optional in requests. Uses DEFAULT_SYNC_ID as the internal syncId.
    * Suitable for single-tenant applications where all data is shared.
@@ -121,6 +125,7 @@ export function createCollectionHandlers(
   const getUserId = options?.getUserId
   const validateSyncAccess = options?.validateSyncAccess
   const syncIdColumn = options?.syncIdColumn ?? 'syncId'
+  const scopeColumn = options?.scopeColumn ?? 'scope'
   const singleTenant = options?.singleTenant ?? false
   const dbName = options?.dbName ?? 'DB'
   const softDeleteCol = options?.softDeleteColumn === true ? 'deletedAt' : (typeof options?.softDeleteColumn === 'string' ? options.softDeleteColumn : null)
@@ -174,12 +179,16 @@ export function createCollectionHandlers(
     getAll: async (c: Context) => {
       const syncId = getSyncIdFromParam(c)
       const consistent = c.req.query('consistent') === 'true'
+      const scope = c.req.query('scope')
       await ensureAccess(c, syncId)
 
       if (consistent || consistentReads) {
         const room = getRoom(c.env, syncId)
         if (room.findAll) {
-          return c.json({ [collection]: await room.findAll(collection, syncId) })
+          const results = scope !== undefined
+            ? await room.findAll(collection, syncId, scope)
+            : await room.findAll(collection, syncId)
+          return c.json({ [collection]: results })
         }
         console.debug(
           `[cf-sync-kit] consistentReads requested but findAll not available for "${collection}". Falling back to direct D1 read.`
@@ -191,6 +200,7 @@ export function createCollectionHandlers(
         const conditions = []
 
         if (!singleTenant) conditions.push(eq((table as any)[syncIdColumn], syncId))
+        if (scope && scopeColumn in (table as any)) conditions.push(eq((table as any)[scopeColumn], scope))
         if (softDeleteCol) conditions.push(isNull((table as any)[softDeleteCol]))
 
         let query = db.select().from(table)
