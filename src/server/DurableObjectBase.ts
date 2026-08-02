@@ -201,7 +201,12 @@ export abstract class DurableObjectBase extends Server<Bindings> {
    * Broadcasts a sync event to all connected clients.
    * Useful for custom server-side operations that need to notify clients.
    */
-  async broadcastSyncEvent(collection: CollectionName, action: ActionType, payload: unknown) {
+  async broadcastSyncEvent(
+    collection: CollectionName,
+    action: ActionType,
+    payload: unknown,
+    scope?: string,
+  ) {
     try {
       const broadcastId = await this.broadcastSystem.getNextId(collection)
 
@@ -211,6 +216,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
         action,
         payload,
         broadcastId,
+        scope,
       }
 
       this.broadcast(JSON.stringify(event))

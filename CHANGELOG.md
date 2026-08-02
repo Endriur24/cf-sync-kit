@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-08-02
+
+### Fixed
+
+- Fixed missing `scope` parameter in `DurableObjectBase.broadcastSyncEvent`, which prevented scope-aware broadcast events from including scope context.
+
 ## [0.23.0] - 2026-08-01
 
 ### Added
@@ -51,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `src/__tests__/createSyncApi.test.ts` covering all CRUD and bulk routes for both multi-tenant and single-tenant modes.
 
+[0.23.1]: https://github.com/Endriur24/cf-sync-kit/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/Endriur24/cf-sync-kit/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/Endriur24/cf-sync-kit/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/Endriur24/cf-sync-kit/compare/v0.21.0...v0.22.0
