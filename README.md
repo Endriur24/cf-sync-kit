@@ -488,6 +488,11 @@ interface UseCollectionOptions {
    * Default: true
    */
   optimisticUpdates?: boolean
+  /**
+   * Move updated items to the top of the collection list in client cache.
+   * Default: false (items retain their existing array position)
+   */
+  reorderOnUpdate?: boolean
 }
 ```
 
@@ -672,7 +677,7 @@ interface UseLiveSyncOptions {
 | Type | Description |
 |------|-------------|
 | `ActionType` | `'insert' \| 'update' \| 'delete' \| 'bulk-insert' \| 'bulk-update' \| 'bulk-delete'` |
-| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, scopeColumn, singleTenant, orderByColumn, orderDirection) |
+| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, scopeColumn, singleTenant, orderByColumn, orderDirection, reorderOnUpdate) |
 | `CollectionsMap` | Map of collection names to configs |
 | `InferInsert<C, K>` | Infer insert type from collection config |
 | `InferUpdate<C, K>` | Infer update type from collection config |

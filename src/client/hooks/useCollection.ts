@@ -34,6 +34,12 @@ export interface UseCollectionOptions {
    * Default: true
    */
   optimisticUpdates?: boolean
+  /**
+   * When true, updated items are moved to the top of the collection list in the client cache.
+   * When false (default), updated items retain their existing array position.
+   * Default: false
+   */
+  reorderOnUpdate?: boolean
 }
 
 function isRetryableError(error: unknown): boolean {
@@ -234,6 +240,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   const refetchOnSuccess = options?.refetchOnSuccess ?? false
   const consistentReads = options?.consistentReads ?? false
   const optimisticUpdates = options?.optimisticUpdates ?? true
+  const reorderOnUpdate = options?.reorderOnUpdate ?? false
   const headers = options?.headers
 
   const getHeaders = useCallback((): Record<string, string> => {
@@ -379,6 +386,13 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
           queryKey,
           (oldData) => {
             if (!oldData) return []
+            if (reorderOnUpdate) {
+              const existing = oldData.find((item) => item.id === variables.id)
+              if (!existing) return oldData
+              const updatedItem = { ...existing, ...variables.data }
+              const remaining = oldData.filter((item) => item.id !== variables.id)
+              return [updatedItem, ...remaining]
+            }
             return oldData.map((item) =>
               item.id === variables.id ? { ...item, ...variables.data } : item
             )
@@ -393,7 +407,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onSuccess: (result) => {
       const entity = result.data
       if (!entity) return
-      applyMutationToCache(queryClient, collection, syncId, scope, 'update', entity)
+      applyMutationToCache(queryClient, collection, syncId, scope, 'update', entity, undefined, undefined, { reorderOnUpdate })
       log('Update success:', entity)
     },
     onError: makeOnError('Update'),

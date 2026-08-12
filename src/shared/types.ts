@@ -41,6 +41,8 @@ export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity
   orderByColumn?: string
   /** Ordering direction for GET results (default: "desc" - newest first) */
   orderDirection?: 'asc' | 'desc'
+  /** When true, updated items are moved to the top of the collection list in client cache (default: false) */
+  reorderOnUpdate?: boolean
 }
 
 /**

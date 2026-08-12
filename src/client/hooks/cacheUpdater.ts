@@ -16,7 +16,8 @@ export function applyMutationToCache(
   action: ActionType,
   payload: unknown,
   compareUpdatedAt?: (existing: any, incoming: any) => any,
-  optimisticIds?: string[]
+  optimisticIds?: string[],
+  options?: { reorderOnUpdate?: boolean }
 ): void {
   const targetScope = scope
   const merge = compareUpdatedAt ?? ((existing: any, incoming: any) => ({ ...existing, ...incoming }))
@@ -40,6 +41,13 @@ export function applyMutationToCache(
         }
         case 'update': {
           const item = payload as { id: string }
+          if (options?.reorderOnUpdate) {
+            const existing = (oldData as any[]).find((d) => d.id === item.id)
+            if (!existing) return oldData
+            const merged = merge(existing, item)
+            const remaining = (oldData as any[]).filter((d) => d.id !== item.id)
+            return [merged, ...remaining]
+          }
           return (oldData as any[]).map((d) =>
             d.id === item.id ? merge(d, item) : d
           )
