@@ -92,9 +92,7 @@ function TodoApp({ currentUser, onLogout }: { currentUser: string; onLogout: () 
         <p className="text-gray-500 text-center py-8">No todos yet. Add one above!</p>
       ) : (
         <ul className="space-y-2">
-          {todos
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-            .map((todo) => (
+          {todos.map((todo) => (
               <li
                 key={todo.id}
                 className="flex items-center gap-3 p-3 border rounded"

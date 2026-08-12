@@ -37,6 +37,10 @@ export type CollectionConfig<TTable = any, TInsert = any, TUpdate = any, TEntity
   autoTimestamp?: boolean
   /** Name of the column for soft-delete (e.g. "deletedAt") or `true` to use "deletedAt" as default */
   softDeleteColumn?: string | boolean
+  /** Name of the column to order GET results by (default: "createdAt" if present, else "id") */
+  orderByColumn?: string
+  /** Ordering direction for GET results (default: "desc" - newest first) */
+  orderDirection?: 'asc' | 'desc'
 }
 
 /**

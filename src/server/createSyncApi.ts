@@ -97,7 +97,9 @@ export function createSyncApi(
         syncIdColumn: config.syncIdColumn ?? options?.syncIdColumn ?? 'syncId',
         scopeColumn: (config as any).scopeColumn ?? options?.scopeColumn ?? 'scope',
         singleTenant: (config as any).singleTenant ?? options?.singleTenant ?? false,
-        softDeleteColumn: (config as any).softDeleteColumn ?? (options as any)?.softDeleteColumn
+        softDeleteColumn: (config as any).softDeleteColumn ?? (options as any)?.softDeleteColumn,
+        orderByColumn: (config as any).orderByColumn ?? options?.orderByColumn,
+        orderDirection: (config as any).orderDirection ?? options?.orderDirection,
       }
     )
     handlerMap.set(collectionName, handlers)

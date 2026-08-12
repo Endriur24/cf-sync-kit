@@ -22,5 +22,7 @@ export const collectionsConfig = {
     insertSchema: createInsertSchema(todosTable).omit({ id: true, createdAt: true, owner_id: true }),
     updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(todosTable),
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
 } as const

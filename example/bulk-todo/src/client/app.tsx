@@ -209,9 +209,7 @@ function TodosList() {
 
       {/* Todo List */}
       <ul className="space-y-2">
-        {todos
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .map((todo) => (
+        {todos.map((todo) => (
             <li
               key={todo.id}
               className={`flex items-center gap-3 p-3 border rounded ${selectedIds.includes(todo.id) ? 'bg-blue-100' : ''}`}

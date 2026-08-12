@@ -106,9 +106,7 @@ function TodosList() {
       </div>
 
       <ul className="space-y-2">
-        {todos
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .map((todo) => (
+        {todos.map((todo) => (
             <li
               key={todo.id}
               className="flex items-center gap-3 p-3 border rounded"
@@ -208,9 +206,7 @@ function NotesList() {
       </div>
 
       <div className="space-y-4">
-        {notes
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .map((note) => (
+        {notes.map((note) => (
           <div
             key={note.id}
             className="p-4 border rounded"

@@ -19,5 +19,7 @@ export const collectionsConfig = {
     updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(todosTable),
     singleTenant: true,
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
 } as const

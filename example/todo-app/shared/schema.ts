@@ -37,6 +37,8 @@ export const collectionsConfig = {
     updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(todosTable),
     singleTenant: true,
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
   notes: {
     table: notesTable,
@@ -44,5 +46,7 @@ export const collectionsConfig = {
     updateSchema: createInsertSchema(notesTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(notesTable),
     singleTenant: true,
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
 } as const

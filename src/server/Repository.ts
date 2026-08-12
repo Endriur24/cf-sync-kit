@@ -1,4 +1,4 @@
-import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { eq, and, inArray, isNull, asc, desc } from 'drizzle-orm'
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { Column } from 'drizzle-orm'
@@ -27,6 +27,8 @@ export class Repository<TTable extends AnySQLiteTable> {
   public readonly singleTenant: boolean
   public readonly autoTimestamp: boolean
   public readonly softDeleteColumn: string | null
+  public readonly orderByColumn: string | null
+  public readonly orderDirection: 'asc' | 'desc'
 
   /**
    * @param d1 - Cloudflare D1 database binding
@@ -37,6 +39,8 @@ export class Repository<TTable extends AnySQLiteTable> {
    * @param autoTimestamp - When true, automatically sets createdAt/updatedAt timestamps (default: true)
    * @param softDeleteColumn - Name of the column for soft-delete or `true` to use "deletedAt"
    * @param scopeColumn - Name of the column used for scope filtering (default: "scope")
+   * @param orderByColumn - Name of the column to order GET results by (default: "createdAt" if present, else "id")
+   * @param orderDirection - Order direction for GET results (default: "desc" - newest first)
    */
   constructor(
     d1: D1Database,
@@ -46,7 +50,9 @@ export class Repository<TTable extends AnySQLiteTable> {
     singleTenant = false,
     autoTimestamp = true,
     softDeleteColumn?: string | boolean,
-    scopeColumn = 'scope'
+    scopeColumn = 'scope',
+    orderByColumn?: string,
+    orderDirection: 'asc' | 'desc' = 'desc'
   ) {
     this.db = drizzle(d1)
     this.syncIdColumn = syncIdColumn
@@ -54,6 +60,8 @@ export class Repository<TTable extends AnySQLiteTable> {
     this.singleTenant = singleTenant
     this.autoTimestamp = autoTimestamp
     this.softDeleteColumn = typeof softDeleteColumn === 'string' ? softDeleteColumn : (softDeleteColumn ? 'deletedAt' : null)
+    this.orderByColumn = orderByColumn ?? null
+    this.orderDirection = orderDirection
   }
 
   private buildWhere(syncId: string, additionalCondition?: any, scope?: string) {
@@ -99,7 +107,13 @@ export class Repository<TTable extends AnySQLiteTable> {
    */
   async findAll(syncId: string, scope?: string) {
     try {
-      const results = await this.db.select().from(this.table).where(this.buildWhere(syncId, undefined, scope))
+      let query = this.db.select().from(this.table).where(this.buildWhere(syncId, undefined, scope)) as any
+      const orderCol = this.orderByColumn ?? ('createdAt' in (this.table as any) ? 'createdAt' : ('id' in (this.table as any) ? 'id' : null))
+      if (orderCol && orderCol in (this.table as any)) {
+        const col = getTableColumn(this.table, orderCol)
+        query = this.orderDirection === 'asc' ? query.orderBy(asc(col)) : query.orderBy(desc(col))
+      }
+      const results = await query
       return results || []
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

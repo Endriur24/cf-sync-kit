@@ -98,7 +98,10 @@ export function createDurableObject<TConfig extends CollectionsMap>(
             config.syncIdColumn ?? 'syncId',
             singleTenant,
             config.autoTimestamp ?? true,
-            config.softDeleteColumn
+            config.softDeleteColumn,
+            config.scopeColumn ?? 'scope',
+            (config as any).orderByColumn,
+            (config as any).orderDirection
           )
         )
       })

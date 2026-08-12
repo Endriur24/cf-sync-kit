@@ -38,6 +38,8 @@ export const collectionsConfig = {
     updateSchema: createInsertSchema(listsTable).omit({ id: true, createdAt: true }).partial(),
     selectSchema: createSelectSchema(listsTable),
     singleTenant: true,
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
   scopedTodos: {
     table: scopedTodosTable,
@@ -46,5 +48,7 @@ export const collectionsConfig = {
     updateSchema: createInsertSchema(scopedTodosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(scopedTodosTable),
     singleTenant: true,
+    orderByColumn: 'createdAt',
+    orderDirection: 'desc',
   },
 } as const

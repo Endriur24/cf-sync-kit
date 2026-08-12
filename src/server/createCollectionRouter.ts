@@ -2,7 +2,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq, and, isNull, asc, desc } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { Context } from 'hono'
 import { isDev } from '../shared/logger'
@@ -81,6 +81,14 @@ export interface CollectionRouterOptions {
    * When enabled, GET requests will filter out soft-deleted records.
    */
   softDeleteColumn?: string | boolean
+  /**
+   * Name of the column to order GET results by (default: "createdAt" if present, else "id").
+   */
+  orderByColumn?: string
+  /**
+   * Order direction for GET results (default: "desc" - newest first).
+   */
+  orderDirection?: 'asc' | 'desc'
 }
 
 /**
@@ -208,6 +216,13 @@ export function createCollectionHandlers(
           query = query.where(conditions[0]) as any
         } else if (conditions.length > 1) {
           query = query.where(and(...conditions)) as any
+        }
+
+        const orderCol = options?.orderByColumn ?? ('createdAt' in (table as any) ? 'createdAt' : ('id' in (table as any) ? 'id' : null))
+        const orderDir = options?.orderDirection ?? 'desc'
+        if (orderCol && orderCol in (table as any)) {
+          const col = (table as any)[orderCol]
+          query = (orderDir === 'asc' ? query.orderBy(asc(col)) : query.orderBy(desc(col))) as any
         }
 
         const results = await query
