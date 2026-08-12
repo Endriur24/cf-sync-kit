@@ -9,6 +9,7 @@ A real-time synchronization framework for Cloudflare Workers with Durable Object
 - **Type-safe** CRUD operations inferred from Drizzle + Zod schemas
 - **Multi-tenant isolation** via syncId scoping
 - **Scope filtering** for shared WebSocket/DO isolation and targeted server-side D1 SQL queries
+- **Server-side ordering** via `orderByColumn` & `orderDirection` (defaults to `createdAt` or `id` descending)
 - **Middleware system** for auth, logging
 - **Health check endpoint** for monitoring (`GET /health`)
 - **Request timeout** (10s) with structured `TIMEOUT_ERROR` handling
@@ -133,6 +134,23 @@ By default, scope filtering looks for a column named `scope`. Use `scopeColumn` 
 ```ts
 // Custom scope column name
 scopeColumn: 'list_id'
+```
+
+#### orderByColumn & orderDirection
+
+By default, `GET` queries and `Repository.findAll` sort results by `createdAt` (if present in the table schema) or `id` in descending order (`desc` - newest first). You can customize the sorting column and direction in collection config:
+
+```ts
+export const collectionsConfig = defineCollections({
+  todos: {
+    table: todosTable,
+    orderByColumn: 'title',   // Column to order by
+    orderDirection: 'asc',    // 'asc' or 'desc' (default: 'desc')
+    insertSchema: ...,
+    updateSchema: ...,
+    selectSchema: ...,
+  },
+})
 ```
 
 #### Single-Tenant Mode
@@ -654,7 +672,7 @@ interface UseLiveSyncOptions {
 | Type | Description |
 |------|-------------|
 | `ActionType` | `'insert' \| 'update' \| 'delete' \| 'bulk-insert' \| 'bulk-update' \| 'bulk-delete'` |
-| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, scopeColumn, singleTenant) |
+| `CollectionConfig` | Config for a collection (table, schemas, syncIdColumn, scopeColumn, singleTenant, orderByColumn, orderDirection) |
 | `CollectionsMap` | Map of collection names to configs |
 | `InferInsert<C, K>` | Infer insert type from collection config |
 | `InferUpdate<C, K>` | Infer update type from collection config |
