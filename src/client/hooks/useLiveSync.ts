@@ -70,6 +70,10 @@ export interface UseLiveSyncOptions {
    * Maximum number of messages to buffer until reconnection (default: Infinity).
    */
   maxEnqueuedMessages?: number
+  /**
+   * Move updated items to the top of the collection list in client cache.
+   */
+  reorderOnUpdate?: boolean
 }
 
 /**
@@ -107,7 +111,7 @@ export function useLiveSync(
     ? { scope: optionsOrScope }
     : optionsOrScope ?? {}
 
-  const { scope, party = 'main', debug = false, onError, query, ...partySocketOptions } = options
+  const { scope, party = 'main', debug = false, onError, query, reorderOnUpdate, ...partySocketOptions } = options
 
   const getQuery = useCallback((): Record<string, string> => {
     if (typeof query === 'function') {
@@ -187,10 +191,12 @@ export function useLiveSync(
         message.scope ?? scope,
         message.action,
         message.payload,
-        compareUpdatedAt
+        compareUpdatedAt,
+        undefined,
+        { reorderOnUpdate }
       )
     },
-    [syncId, queryClient, compareUpdatedAt, scope]
+    [syncId, queryClient, compareUpdatedAt, scope, reorderOnUpdate]
   )
 
   usePartySocket({
