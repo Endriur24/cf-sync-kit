@@ -402,12 +402,16 @@ export function useLiveSync(
       debugLog('Disconnected')
       setStatus(syncId, 'reconnecting')
     },
-    // In the WebSocket API, onerror is always followed by onclose.
-    // Epoch bump, heartbeat stop and status update happen in onClose;
-    // here we only report the error. stop() is idempotent if called twice.
+    // Defensively duplicate the epoch bump and status update from onClose.
+    // Native WebSocket fires onclose after onerror, but PartySocket wraps
+    // the transport, so we don't rely on that ordering. A double epoch bump
+    // is safe because the epoch is only used to invalidate stale async work;
+    // stop() and setStatus() are true no-ops on repeated calls.
     onError: (e) => {
+      connectionEpoch.current++
       heartbeatRef.current.stop()
       debugLog('WebSocket error:', e)
+      setStatus(syncId, 'reconnecting')
       reportError(new SyncError('WebSocket connection error', 'WS_ERROR', undefined, e))
     },
   })
