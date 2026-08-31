@@ -323,6 +323,7 @@ export function useLiveSync(
     },
 
     onMessage: async (event) => {
+      const messageEpoch = connectionEpoch.current
       heartbeatRef.current.acknowledge()
       if (event.data === "pong") return
 
@@ -350,7 +351,7 @@ export function useLiveSync(
       if (message.type === 'sync-init') {
         debugLog('Sync init received, counters:', message.counters)
         syncState.current.isSyncing = true
-        await completeSync(message.counters, connectionEpoch.current)
+        await completeSync(message.counters, messageEpoch)
         return
       }
 
@@ -393,7 +394,10 @@ export function useLiveSync(
         debugLog('Applied broadcast:', message.action, message.collection)
       }
 
-      lastBroadcastIds.current.set(message.collection, message.broadcastId)
+      // Guard: do not update counters if a reconnect occurred during async refetch
+      if (messageEpoch === connectionEpoch.current) {
+        lastBroadcastIds.current.set(message.collection, message.broadcastId)
+      }
     },
 
     onClose: () => {

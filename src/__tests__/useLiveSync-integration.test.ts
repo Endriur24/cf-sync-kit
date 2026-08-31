@@ -589,4 +589,96 @@ describe('useLiveSync integration', () => {
     // No probe/ping should be sent after unmount
     expect(room.socket.send).not.toHaveBeenCalled()
   })
+
+  // -----------------------------------------------------------------------
+  // Scenario 12: Reconnect during gap refetch does not overwrite new session counters
+  // -----------------------------------------------------------------------
+  it('does not overwrite new session counters if reconnect happens during gap refetch', async () => {
+    const { Wrapper, queryClient } = createWrapper()
+    queryClient.setQueryData(['todos', 'room-1', undefined], [])
+
+    let resolveSlowRefetch: () => void = () => {}
+    const slowRefetchPromise = new Promise<void>((resolve) => {
+      resolveSlowRefetch = resolve
+    })
+
+    // Mock refetchQueries to pause only during gap refetch (which passes queryKey),
+    // while allowing sync-init recovery refetches (which pass predicate) to resolve immediately.
+    const refetchSpy = vi.spyOn(queryClient, 'refetchQueries').mockImplementation(async (options: any) => {
+      if (options && 'queryKey' in options) {
+        await slowRefetchPromise
+      }
+    })
+
+    renderHook(() => useLiveSync('room-1'), { wrapper: Wrapper })
+    const room = getRoomSocket('room-1')
+
+    // Connection 1: connect with counter = 5
+    await act(async () => {
+      room.handlers.onOpen()
+      await room.handlers.onMessage(syncInitMessage({ todos: 5 }))
+    })
+
+    // Receive message with gap (broadcastId = 10) -> starts slow refetch
+    const messagePromise = room.handlers.onMessage(
+      broadcastMessage('todos', 'update', { id: '1', title: 'gap' }, 10),
+    )
+
+    // While gap refetch is pending, socket reconnects and session 2 starts with counter = 20
+    await act(async () => {
+      room.handlers.onClose()
+      room.handlers.onOpen()
+      await room.handlers.onMessage(syncInitMessage({ todos: 20 }))
+    })
+
+    // Now complete the slow refetch from connection 1
+    await act(async () => {
+      resolveSlowRefetch()
+      await messagePromise
+    })
+
+    // Connection 2's counter (20) should NOT have been overwritten by stale message 10
+    // Send a message with broadcastId 21 (expected 21 -> valid next message)
+    refetchSpy.mockClear()
+    await act(async () => {
+      await room.handlers.onMessage(
+        broadcastMessage('todos', 'update', { id: '2', title: 'valid' }, 21),
+      )
+    })
+
+    // It should have applied without gap detection
+    expect(refetchSpy).not.toHaveBeenCalled()
+  })
+
+  // -----------------------------------------------------------------------
+  // Scenario 13: 5s sync-init timeout fallback refetches and unblocks syncing
+  // -----------------------------------------------------------------------
+  it('unblocks message processing after 5s sync-init timeout', async () => {
+    const { Wrapper, queryClient } = createWrapper()
+    queryClient.setQueryData(['todos', 'room-1', undefined], [{ id: '1', title: 'item' }])
+
+    const { result } = renderHook(
+      () => ({
+        sync: useLiveSync('room-1'),
+        connection: useConnectionStatus(),
+      }),
+      { wrapper: Wrapper },
+    )
+
+    const room = getRoomSocket('room-1')
+
+    // Open connection
+    await act(async () => {
+      room.handlers.onOpen()
+    })
+    expect(result.current.connection.status).toBe('synchronizing')
+
+    // No sync-init arrives — advance timer by 5000ms
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    // Should have transitioned to connected
+    expect(result.current.connection.status).toBe('connected')
+  })
 })
