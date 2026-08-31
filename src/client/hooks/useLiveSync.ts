@@ -249,13 +249,6 @@ export function useLiveSync(
     counters?: Record<string, number>,
     expectedEpoch = connectionEpoch.current,
   ) => {
-    lastBroadcastIds.current.clear()
-    if (counters) {
-      Object.entries(counters).forEach(([collection, count]) => {
-        lastBroadcastIds.current.set(collection, count)
-      })
-    }
-
     let isHealthy = false
     try {
       await refetchForRecovery()
@@ -267,6 +260,18 @@ export function useLiveSync(
 
     // Never let a stale recovery overwrite the status or queue of a newer socket.
     if (expectedEpoch !== connectionEpoch.current) return false
+
+    // Update counters only after the epoch guard so a slow recovery from a
+    // previous connection cannot destroy counters set by a newer one.
+    // When counters is undefined (e.g. resume/timeout) we keep existing
+    // counters — gap-detection will handle any discrepancies.
+    if (counters) {
+      lastBroadcastIds.current.clear()
+      Object.entries(counters).forEach(([collection, count]) => {
+        lastBroadcastIds.current.set(collection, count)
+      })
+    }
+
     clearFallbackTimeout()
     syncState.current.isSyncing = false
     syncState.current.queue.forEach(handleBroadcast)
@@ -300,6 +305,9 @@ export function useLiveSync(
       debugLog('Connected')
       setStatus(syncId, 'synchronizing')
       heartbeatRef.current.start()
+      // Discard any messages queued during the previous connection — they are
+      // stale and would bypass broadcastId validation when replayed.
+      syncState.current.queue = []
       // Prevent race condition: messages arriving before sync-init
       // are queued until counters are received and refetch completes
       syncState.current.isSyncing = true
@@ -394,11 +402,12 @@ export function useLiveSync(
       debugLog('Disconnected')
       setStatus(syncId, 'reconnecting')
     },
+    // In the WebSocket API, onerror is always followed by onclose.
+    // Epoch bump, heartbeat stop and status update happen in onClose;
+    // here we only report the error. stop() is idempotent if called twice.
     onError: (e) => {
-      connectionEpoch.current++
       heartbeatRef.current.stop()
       debugLog('WebSocket error:', e)
-      setStatus(syncId, 'reconnecting')
       reportError(new SyncError('WebSocket connection error', 'WS_ERROR', undefined, e))
     },
   })
@@ -467,12 +476,22 @@ export function useLiveSync(
             finishSync(undefined, expectedEpoch),
             heartbeatRef.current.probeNow(),
           ]).then(([isHealthy, isAlive]) => {
-            if (expectedEpoch !== connectionEpoch.current || !isAlive) return
+            if (expectedEpoch !== connectionEpoch.current) return
+            if (!isAlive) {
+              // Probe failed — socket is dead. reconnect() was already called
+              // inside probe, but set the status explicitly so the UI doesn't
+              // stay on 'synchronizing' until onClose fires.
+              setStatus(syncId, 'reconnecting')
+              return
+            }
             setStatus(syncId, isHealthy ? 'connected' : 'degraded')
           })
           return
         }
-        heartbeatRef.current.probeNow()
+        // Already syncing — just verify the transport is alive.
+        void heartbeatRef.current.probeNow().then((isAlive) => {
+          if (!isAlive) setStatus(syncId, 'reconnecting')
+        })
         return
       }
 

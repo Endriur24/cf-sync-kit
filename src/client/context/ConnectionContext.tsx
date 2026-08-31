@@ -7,11 +7,17 @@ interface ConnectionContextType {
   setStatus: (syncId: string, status: ConnectionStatus) => void
   /** Connection status keyed by syncId, for applications with multiple rooms. */
   roomStatuses: Readonly<Record<string, ConnectionStatus>>
+  /** True when status is 'connected'. */
   isConnected: boolean
+  /** True when the connection is not yet fully operational ('connecting' or 'synchronizing'). */
   isConnecting: boolean
+  /** True when status is 'reconnecting'. */
   isReconnecting: boolean
+  /** True when status is 'synchronizing'. */
   isSynchronizing: boolean
+  /** True when status is 'degraded' (socket alive but refetch failed). */
   isDegraded: boolean
+  /** True when the connection is down ('disconnected' or 'reconnecting'). */
   isDisconnected: boolean
 }
 
