@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-31
+
+### Added
+
+- Added explicit connection lifecycle states: `reconnecting`, `synchronizing`, and `degraded`, along with `isReconnecting`, `isSynchronizing`, and `isDegraded` helpers from `useConnectionStatus()`.
+- Added recovery when a tab becomes visible, returns from the back/forward cache, or receives the browser `online` hint. Recovery validates the socket with `ping`/`pong` and refetches affected queries before reporting `connected`.
+- Added integration tests for `useLiveSync` covering connection state transitions, recovery events, broadcast gaps, cleanup, and multi-room aggregation.
+
+### Changed
+
+- `connected` is reported only after the initial or recovery refetch completes successfully; refetch failures now report `degraded`.
+- The automatic connection lifecycle continuously retries failed transports and therefore reports `reconnecting` rather than `disconnected`.
+
+### Fixed
+
+- Prevented broadcasts and refetches from a previous socket session from overwriting counters, queues, or state after reconnecting.
+- Cleared stale queued broadcasts when a new socket session opens and guarded gap-refetch counter updates against reconnect races.
+
 ## [0.24.1] - 2026-08-12
 
 ### Added
@@ -73,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `src/__tests__/createSyncApi.test.ts` covering all CRUD and bulk routes for both multi-tenant and single-tenant modes.
 
+[0.25.0]: https://github.com/Endriur24/cf-sync-kit/compare/v0.24.11...v0.25.0
 [0.24.1]: https://github.com/Endriur24/cf-sync-kit/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/Endriur24/cf-sync-kit/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/Endriur24/cf-sync-kit/compare/v0.23.0...v0.23.1

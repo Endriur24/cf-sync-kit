@@ -445,7 +445,7 @@ function TodoList() {
 | Export | Description |
 |--------|-------------|
 | `ConnectionProvider` | React provider for WebSocket connection state |
-| `useConnectionStatus()` | Returns `{ status, isConnected, isConnecting, isDisconnected }` |
+| `useConnectionStatus()` | Returns aggregate and per-room status, including `isConnected`, `isConnecting`, `isReconnecting`, `isSynchronizing`, `isDegraded`, and `isDisconnected` |
 | `useCollection<C, K>(...)` | Generic CRUD hook — types inferred from collection name |
 | `useLiveSync(syncId, options?)` | WebSocket sync hook with broadcast handling |
 | `defineCollections(config)` | Type-safe config helper — alternative to `as const` |
@@ -656,11 +656,14 @@ browser from retaining a half-open (zombie) WebSocket for minutes.
 
 `useConnectionStatus()` retains its aggregate `status`; it is `connected` only
 when every active `syncId` has completed its recovery refetch. Its `roomStatuses`
-property exposes the individual status for each room. Statuses are `connecting`,
-`reconnecting`, `synchronizing`, `connected`, `degraded`, and `disconnected`.
-When a tab becomes visible again, returns from the back/forward cache, or receives
-the browser's `online` hint, the hook immediately probes the socket and refetches
-its scoped queries before returning to `connected`.
+property exposes the individual status for each room. During the automatic
+connection lifecycle, statuses are `connecting`, `reconnecting`,
+`synchronizing`, `connected`, and `degraded`. The hook keeps retrying after a
+transport failure, so it does not emit `disconnected`; that value remains in
+`ConnectionStatus` for compatibility and explicit application-level status
+management. When a tab becomes visible again, returns from the back/forward
+cache, or receives the browser's `online` hint, the hook immediately probes the
+socket and refetches its scoped queries before returning to `connected`.
 
 ### Server (`cf-sync-kit/server`)
 
