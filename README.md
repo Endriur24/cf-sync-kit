@@ -644,8 +644,19 @@ interface UseLiveSyncOptions {
   debug?: boolean             // Enable debug logging
   onError?: (error: Error) => void  // Error callback
   query?: Record<string, string> | (() => Record<string, string>)  // URL query params for auth tokens
+  heartbeatInterval?: number  // Liveness probe cadence in ms (default: 20000; 0 disables it)
+  heartbeatTimeout?: number   // Wait for pong before reconnecting, in ms (default: 10000)
 }
 ```
+
+`useLiveSync` sends an application-level `ping` on the configured interval. The
+included `DurableObjectBase` answers with `pong` at the Cloudflare edge, including
+while hibernated. A missing pong forces PartySocket to reconnect, preventing a
+browser from retaining a half-open (zombie) WebSocket for minutes.
+
+`useConnectionStatus()` retains its aggregate `status`; it is `connected` only
+when every active `syncId` is connected. Its `roomStatuses` property exposes the
+individual status for each room.
 
 ### Server (`cf-sync-kit/server`)
 

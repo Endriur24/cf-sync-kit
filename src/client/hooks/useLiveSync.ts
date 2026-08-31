@@ -70,6 +70,10 @@ export interface UseLiveSyncOptions {
    * Maximum number of messages to buffer until reconnection (default: Infinity).
    */
   maxEnqueuedMessages?: number
+  /** Interval in ms between application-level liveness probes (default: 20000; set to 0 to disable). */
+  heartbeatInterval?: number
+  /** Time in ms to wait for a pong before forcing a reconnect (default: 10000). */
+  heartbeatTimeout?: number
   /**
    * Move updated items to the top of the collection list in client cache.
    */
@@ -111,7 +115,17 @@ export function useLiveSync(
     ? { scope: optionsOrScope }
     : optionsOrScope ?? {}
 
-  const { scope, party = 'main', debug = false, onError, query, reorderOnUpdate, ...partySocketOptions } = options
+  const {
+    scope,
+    party = 'main',
+    debug = false,
+    onError,
+    query,
+    reorderOnUpdate,
+    heartbeatInterval = 20_000,
+    heartbeatTimeout = 10_000,
+    ...partySocketOptions
+  } = options
 
   const getQuery = useCallback((): Record<string, string> => {
     if (typeof query === 'function') {
@@ -140,6 +154,21 @@ export function useLiveSync(
     timeoutId: null,
   })
   const lastBroadcastIds = useRef<Map<string, number>>(new Map())
+  const heartbeatRef = useRef<{
+    intervalId: ReturnType<typeof setInterval> | null
+    timeoutId: ReturnType<typeof setTimeout> | null
+    awaitingPong: boolean
+    start: () => void
+    stop: () => void
+    acknowledge: () => void
+  }>({
+    intervalId: null,
+    timeoutId: null,
+    awaitingPong: false,
+    start: () => {},
+    stop: () => {},
+    acknowledge: () => {},
+  })
 
   // Cancel and reset the fallback timeout used when sync-init doesn't arrive
   const clearFallbackTimeout = useCallback(() => {
@@ -199,7 +228,37 @@ export function useLiveSync(
     [syncId, queryClient, compareUpdatedAt, scope, reorderOnUpdate]
   )
 
-  usePartySocket({
+  const refetchForRecovery = useCallback(async () => {
+    await queryClient.refetchQueries({
+      predicate: (query) => {
+        const [_collection, qSyncId, qScope] = query.queryKey as [string, string, string | undefined]
+        return qSyncId === syncId && (!scope || qScope === scope)
+      },
+    })
+  }, [queryClient, syncId, scope])
+
+  const finishSync = useCallback(async (counters?: Record<string, number>) => {
+    lastBroadcastIds.current.clear()
+    if (counters) {
+      Object.entries(counters).forEach(([collection, count]) => {
+        lastBroadcastIds.current.set(collection, count)
+      })
+    }
+
+    try {
+      await refetchForRecovery()
+      debugLog('Refetch complete')
+    } catch (e) {
+      reportError(new SyncError('Failed to refetch queries during sync', 'REFETCH_ERROR', undefined, e))
+    } finally {
+      clearFallbackTimeout()
+      syncState.current.isSyncing = false
+      syncState.current.queue.forEach(handleBroadcast)
+      syncState.current.queue = []
+    }
+  }, [clearFallbackTimeout, debugLog, handleBroadcast, refetchForRecovery, reportError])
+
+  const socket = usePartySocket({
     room: syncId,
     party,
     // Pass function reference so query params are re-evaluated on each reconnect
@@ -211,7 +270,8 @@ export function useLiveSync(
 
     onOpen: () => {
       debugLog('Connected')
-      setStatus("connected")
+      setStatus(syncId, "connected")
+      heartbeatRef.current.start()
       // Prevent race condition: messages arriving before sync-init
       // are queued until counters are received and refetch completes
       syncState.current.isSyncing = true
@@ -220,15 +280,14 @@ export function useLiveSync(
       clearFallbackTimeout()
       syncState.current.timeoutId = setTimeout(() => {
         if (syncState.current.isSyncing) {
-          debugLog('Sync-init timeout — unblocking message processing')
-          syncState.current.isSyncing = false
-          syncState.current.queue.forEach(handleBroadcast)
-          syncState.current.queue = []
+          debugLog('Sync-init timeout — refetching before unblocking message processing')
+          void finishSync()
         }
       }, 5000)
     },
 
     onMessage: async (event) => {
+      heartbeatRef.current.acknowledge()
       if (event.data === "pong") return
 
       let rawData: unknown
@@ -255,29 +314,7 @@ export function useLiveSync(
       if (message.type === 'sync-init') {
         debugLog('Sync init received, counters:', message.counters)
         syncState.current.isSyncing = true
-
-        lastBroadcastIds.current.clear()
-        Object.entries(message.counters).forEach(([collection, count]) => {
-          lastBroadcastIds.current.set(collection, count)
-        })
-
-        try {
-          // Match queries by exact syncId and scope position in queryKey
-          await queryClient.refetchQueries({
-            predicate: (query) => {
-              const [_collection, qSyncId, qScope] = query.queryKey as [string, string, string | undefined]
-              return qSyncId === syncId && (!scope || qScope === scope)
-            },
-          })
-          debugLog('Refetch complete')
-        } catch (e) {
-          reportError(new SyncError('Failed to refetch queries during sync', 'REFETCH_ERROR', undefined, e))
-        } finally {
-          clearFallbackTimeout()
-          syncState.current.isSyncing = false
-          syncState.current.queue.forEach(handleBroadcast)
-          syncState.current.queue = []
-        }
+        await finishSync(message.counters)
         return
       }
 
@@ -308,9 +345,13 @@ export function useLiveSync(
         debugLog(
           `Gap in broadcasts for ${message.collection} (expected ${lastId + 1}, got ${message.broadcastId}), refetching`
         )
-        queryClient.refetchQueries({
-          queryKey: [message.collection, syncId, message.scope],
-        })
+        try {
+          await queryClient.refetchQueries({
+            queryKey: [message.collection, syncId, message.scope],
+          })
+        } catch (e) {
+          reportError(new SyncError('Failed to refetch queries after broadcast gap', 'REFETCH_ERROR', undefined, e))
+        }
       } else {
         handleBroadcast(message)
         debugLog('Applied broadcast:', message.action, message.collection)
@@ -320,13 +361,52 @@ export function useLiveSync(
     },
 
     onClose: () => {
+      heartbeatRef.current.stop()
       debugLog('Disconnected')
-      setStatus("disconnected")
+      setStatus(syncId, "disconnected")
     },
     onError: (e) => {
+      heartbeatRef.current.stop()
       debugLog('WebSocket error:', e)
-      setStatus("disconnected")
+      setStatus(syncId, "disconnected")
       reportError(new SyncError('WebSocket connection error', 'WS_ERROR', undefined, e))
     },
   })
+
+  useEffect(() => {
+    const stop = () => {
+      if (heartbeatRef.current.intervalId) clearInterval(heartbeatRef.current.intervalId)
+      if (heartbeatRef.current.timeoutId) clearTimeout(heartbeatRef.current.timeoutId)
+      heartbeatRef.current.intervalId = null
+      heartbeatRef.current.timeoutId = null
+      heartbeatRef.current.awaitingPong = false
+    }
+
+    const acknowledge = () => {
+      if (heartbeatRef.current.timeoutId) clearTimeout(heartbeatRef.current.timeoutId)
+      heartbeatRef.current.timeoutId = null
+      heartbeatRef.current.awaitingPong = false
+    }
+
+    const probe = () => {
+      if (heartbeatRef.current.awaitingPong || socket.readyState !== socket.OPEN) return
+      heartbeatRef.current.awaitingPong = true
+      socket.send('ping')
+      heartbeatRef.current.timeoutId = setTimeout(() => {
+        if (!heartbeatRef.current.awaitingPong) return
+        debugLog('Heartbeat timeout — forcing reconnect')
+        // PartySocket.close() disables reconnection; reconnect() preserves its retry policy.
+        socket.reconnect(4000, 'heartbeat timeout')
+      }, heartbeatTimeout)
+    }
+
+    const start = () => {
+      stop()
+      if (heartbeatInterval <= 0) return
+      heartbeatRef.current.intervalId = setInterval(probe, heartbeatInterval)
+    }
+
+    heartbeatRef.current = { ...heartbeatRef.current, start, stop, acknowledge }
+    return stop
+  }, [socket, heartbeatInterval, heartbeatTimeout, debugLog])
 }

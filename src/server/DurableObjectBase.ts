@@ -32,6 +32,9 @@ export abstract class DurableObjectBase extends Server<Bindings> {
 
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env)
+    // Respond to liveness probes at the edge, including while the object is hibernated.
+    // This prevents heartbeat traffic from waking the Durable Object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
     this.broadcastSystem = new BroadcastSystem(ctx.storage)
     this.middlewareSystem = new MiddlewareSystem()
   }

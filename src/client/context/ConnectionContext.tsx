@@ -1,9 +1,12 @@
-import { createContext, useContext, useState, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, useRef, type ReactNode } from 'react'
 import type { ConnectionStatus } from '../../shared/types'
 
 interface ConnectionContextType {
   status: ConnectionStatus
-  setStatus: (status: ConnectionStatus) => void
+  /** Aggregate status: connected only when every active room is connected. */
+  setStatus: (syncId: string, status: ConnectionStatus) => void
+  /** Connection status keyed by syncId, for applications with multiple rooms. */
+  roomStatuses: Readonly<Record<string, ConnectionStatus>>
   isConnected: boolean
   isConnecting: boolean
   isDisconnected: boolean
@@ -29,21 +32,48 @@ const LiveSyncRegistryContext = createContext<LiveSyncRegistry | undefined>(unde
  * </ConnectionProvider>
  */
 export function ConnectionProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [roomStatuses, setRoomStatuses] = useState<Record<string, ConnectionStatus>>({})
+  const roomRefCounts = useRef(new Map<string, number>())
 
   const registryRef = useRef<LiveSyncRegistry>({
     syncIds: new Set(),
-    register: (syncId: string) => { registryRef.current.syncIds.add(syncId) },
-    unregister: (syncId: string) => { registryRef.current.syncIds.delete(syncId) },
+    register: (syncId: string) => {
+      roomRefCounts.current.set(syncId, (roomRefCounts.current.get(syncId) ?? 0) + 1)
+      registryRef.current.syncIds.add(syncId)
+    },
+    unregister: (syncId: string) => {
+      const nextCount = (roomRefCounts.current.get(syncId) ?? 1) - 1
+      if (nextCount > 0) {
+        roomRefCounts.current.set(syncId, nextCount)
+        return
+      }
+      roomRefCounts.current.delete(syncId)
+      registryRef.current.syncIds.delete(syncId)
+      setRoomStatuses((current) => {
+        const { [syncId]: _removed, ...remaining } = current
+        return remaining
+      })
+    },
     has: (syncId: string): boolean => registryRef.current.syncIds.has(syncId),
   })
+
+  const setStatus = (syncId: string, status: ConnectionStatus) => {
+    setRoomStatuses((current) => current[syncId] === status ? current : { ...current, [syncId]: status })
+  }
+
+  const status = useMemo<ConnectionStatus>(() => {
+    const statuses = [...registryRef.current.syncIds].map((syncId) => roomStatuses[syncId] ?? 'connecting')
+    if (statuses.length === 0 || statuses.some((roomStatus) => roomStatus === 'connecting')) return 'connecting'
+    if (statuses.every((roomStatus) => roomStatus === 'connected')) return 'connected'
+    return 'disconnected'
+  }, [roomStatuses])
 
   const isConnected = status === 'connected'
   const isConnecting = status === 'connecting'
   const isDisconnected = status === 'disconnected'
 
   return (
-    <ConnectionContext.Provider value={{ status, setStatus, isConnected, isConnecting, isDisconnected }}>
+    <ConnectionContext.Provider value={{ status, setStatus, roomStatuses, isConnected, isConnecting, isDisconnected }}>
       <LiveSyncRegistryContext.Provider value={registryRef.current}>
         {children}
       </LiveSyncRegistryContext.Provider>
