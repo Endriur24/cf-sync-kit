@@ -18,10 +18,13 @@ const App = () => {
   )
 }
 
-function ConnectionStatus({ status }: { status: 'connecting' | 'connected' | 'disconnected' }) {
+function ConnectionStatus({ status }: { status: import('cf-sync-kit').ConnectionStatus }) {
   const config = {
     connecting: { color: 'bg-yellow-500', text: 'Connecting...' },
+    reconnecting: { color: 'bg-yellow-500', text: 'Reconnecting...' },
+    synchronizing: { color: 'bg-yellow-500', text: 'Synchronizing...' },
     connected: { color: 'bg-green-500', text: 'Connected' },
+    degraded: { color: 'bg-orange-500', text: 'Sync needs attention' },
     disconnected: { color: 'bg-red-500', text: 'Disconnected' },
   }
 

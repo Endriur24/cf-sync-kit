@@ -154,20 +154,28 @@ export function useLiveSync(
     timeoutId: null,
   })
   const lastBroadcastIds = useRef<Map<string, number>>(new Map())
+  // Invalidates in-flight refetches from an older socket after a disconnect/reconnect.
+  const connectionEpoch = useRef(0)
   const heartbeatRef = useRef<{
     intervalId: ReturnType<typeof setInterval> | null
     timeoutId: ReturnType<typeof setTimeout> | null
     awaitingPong: boolean
+    probePromise: Promise<boolean> | null
+    resolveProbe: ((isAlive: boolean) => void) | null
     start: () => void
     stop: () => void
     acknowledge: () => void
+    probeNow: () => Promise<boolean>
   }>({
     intervalId: null,
     timeoutId: null,
     awaitingPong: false,
+    probePromise: null,
+    resolveProbe: null,
     start: () => {},
     stop: () => {},
     acknowledge: () => {},
+    probeNow: async () => false,
   })
 
   // Cancel and reset the fallback timeout used when sync-init doesn't arrive
@@ -237,7 +245,10 @@ export function useLiveSync(
     })
   }, [queryClient, syncId, scope])
 
-  const finishSync = useCallback(async (counters?: Record<string, number>) => {
+  const finishSync = useCallback(async (
+    counters?: Record<string, number>,
+    expectedEpoch = connectionEpoch.current,
+  ) => {
     lastBroadcastIds.current.clear()
     if (counters) {
       Object.entries(counters).forEach(([collection, count]) => {
@@ -245,18 +256,34 @@ export function useLiveSync(
       })
     }
 
+    let isHealthy = false
     try {
       await refetchForRecovery()
+      isHealthy = true
       debugLog('Refetch complete')
     } catch (e) {
       reportError(new SyncError('Failed to refetch queries during sync', 'REFETCH_ERROR', undefined, e))
-    } finally {
-      clearFallbackTimeout()
-      syncState.current.isSyncing = false
-      syncState.current.queue.forEach(handleBroadcast)
-      syncState.current.queue = []
     }
+
+    // Never let a stale recovery overwrite the status or queue of a newer socket.
+    if (expectedEpoch !== connectionEpoch.current) return false
+    clearFallbackTimeout()
+    syncState.current.isSyncing = false
+    syncState.current.queue.forEach(handleBroadcast)
+    syncState.current.queue = []
+    return isHealthy
   }, [clearFallbackTimeout, debugLog, handleBroadcast, refetchForRecovery, reportError])
+
+  const completeSync = useCallback(async (
+    counters?: Record<string, number>,
+    expectedEpoch = connectionEpoch.current,
+  ) => {
+    const isHealthy = await finishSync(counters, expectedEpoch)
+    if (expectedEpoch === connectionEpoch.current) {
+      setStatus(syncId, isHealthy ? 'connected' : 'degraded')
+    }
+    return isHealthy
+  }, [finishSync, setStatus, syncId])
 
   const socket = usePartySocket({
     room: syncId,
@@ -269,8 +296,9 @@ export function useLiveSync(
     ...partySocketOptions,
 
     onOpen: () => {
+      const currentEpoch = ++connectionEpoch.current
       debugLog('Connected')
-      setStatus(syncId, "connected")
+      setStatus(syncId, 'synchronizing')
       heartbeatRef.current.start()
       // Prevent race condition: messages arriving before sync-init
       // are queued until counters are received and refetch completes
@@ -281,7 +309,7 @@ export function useLiveSync(
       syncState.current.timeoutId = setTimeout(() => {
         if (syncState.current.isSyncing) {
           debugLog('Sync-init timeout — refetching before unblocking message processing')
-          void finishSync()
+          void completeSync(undefined, currentEpoch)
         }
       }, 5000)
     },
@@ -314,7 +342,7 @@ export function useLiveSync(
       if (message.type === 'sync-init') {
         debugLog('Sync init received, counters:', message.counters)
         syncState.current.isSyncing = true
-        await finishSync(message.counters)
+        await completeSync(message.counters, connectionEpoch.current)
         return
       }
 
@@ -361,14 +389,16 @@ export function useLiveSync(
     },
 
     onClose: () => {
+      connectionEpoch.current++
       heartbeatRef.current.stop()
       debugLog('Disconnected')
-      setStatus(syncId, "disconnected")
+      setStatus(syncId, 'reconnecting')
     },
     onError: (e) => {
+      connectionEpoch.current++
       heartbeatRef.current.stop()
       debugLog('WebSocket error:', e)
-      setStatus(syncId, "disconnected")
+      setStatus(syncId, 'reconnecting')
       reportError(new SyncError('WebSocket connection error', 'WS_ERROR', undefined, e))
     },
   })
@@ -380,24 +410,38 @@ export function useLiveSync(
       heartbeatRef.current.intervalId = null
       heartbeatRef.current.timeoutId = null
       heartbeatRef.current.awaitingPong = false
+      heartbeatRef.current.resolveProbe?.(false)
+      heartbeatRef.current.resolveProbe = null
+      heartbeatRef.current.probePromise = null
     }
 
     const acknowledge = () => {
       if (heartbeatRef.current.timeoutId) clearTimeout(heartbeatRef.current.timeoutId)
       heartbeatRef.current.timeoutId = null
       heartbeatRef.current.awaitingPong = false
+      heartbeatRef.current.resolveProbe?.(true)
+      heartbeatRef.current.resolveProbe = null
+      heartbeatRef.current.probePromise = null
     }
 
     const probe = () => {
-      if (heartbeatRef.current.awaitingPong || socket.readyState !== socket.OPEN) return
+      if (heartbeatRef.current.awaitingPong) return heartbeatRef.current.probePromise ?? Promise.resolve(false)
+      if (socket.readyState !== socket.OPEN) return Promise.resolve(false)
       heartbeatRef.current.awaitingPong = true
       socket.send('ping')
+      heartbeatRef.current.probePromise = new Promise<boolean>((resolve) => {
+        heartbeatRef.current.resolveProbe = resolve
+      })
       heartbeatRef.current.timeoutId = setTimeout(() => {
         if (!heartbeatRef.current.awaitingPong) return
         debugLog('Heartbeat timeout — forcing reconnect')
+        heartbeatRef.current.resolveProbe?.(false)
+        heartbeatRef.current.resolveProbe = null
+        heartbeatRef.current.probePromise = null
         // PartySocket.close() disables reconnection; reconnect() preserves its retry policy.
         socket.reconnect(4000, 'heartbeat timeout')
       }, heartbeatTimeout)
+      return heartbeatRef.current.probePromise
     }
 
     const start = () => {
@@ -406,7 +450,51 @@ export function useLiveSync(
       heartbeatRef.current.intervalId = setInterval(probe, heartbeatInterval)
     }
 
-    heartbeatRef.current = { ...heartbeatRef.current, start, stop, acknowledge }
+    heartbeatRef.current = { ...heartbeatRef.current, start, stop, acknowledge, probeNow: probe }
     return stop
   }, [socket, heartbeatInterval, heartbeatTimeout, debugLog])
+
+  useEffect(() => {
+    const recoverAfterResume = () => {
+      if (socket.readyState === socket.OPEN) {
+        // A tab may have missed broadcasts while suspended even if the transport survived.
+        if (!syncState.current.isSyncing) {
+          debugLog('Resumed — verifying connection and refreshing data')
+          syncState.current.isSyncing = true
+          setStatus(syncId, 'synchronizing')
+          const expectedEpoch = connectionEpoch.current
+          void Promise.all([
+            finishSync(undefined, expectedEpoch),
+            heartbeatRef.current.probeNow(),
+          ]).then(([isHealthy, isAlive]) => {
+            if (expectedEpoch !== connectionEpoch.current || !isAlive) return
+            setStatus(syncId, isHealthy ? 'connected' : 'degraded')
+          })
+          return
+        }
+        heartbeatRef.current.probeNow()
+        return
+      }
+
+      debugLog('Resumed without an open socket — reconnecting')
+      setStatus(syncId, 'reconnecting')
+      socket.reconnect(4000, 'network resumed')
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') recoverAfterResume()
+    }
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) recoverAfterResume()
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('online', recoverAfterResume)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('online', recoverAfterResume)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [debugLog, finishSync, setStatus, socket, syncId])
 }

@@ -98,7 +98,13 @@ export type PendingMutationInfo = {
 /**
  * WebSocket connection status for the client.
  */
-export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
+export type ConnectionStatus =
+  | 'connecting'
+  | 'reconnecting'
+  | 'synchronizing'
+  | 'connected'
+  | 'degraded'
+  | 'disconnected'
 
 /**
  * Collection name identifier.

@@ -655,8 +655,12 @@ while hibernated. A missing pong forces PartySocket to reconnect, preventing a
 browser from retaining a half-open (zombie) WebSocket for minutes.
 
 `useConnectionStatus()` retains its aggregate `status`; it is `connected` only
-when every active `syncId` is connected. Its `roomStatuses` property exposes the
-individual status for each room.
+when every active `syncId` has completed its recovery refetch. Its `roomStatuses`
+property exposes the individual status for each room. Statuses are `connecting`,
+`reconnecting`, `synchronizing`, `connected`, `degraded`, and `disconnected`.
+When a tab becomes visible again, returns from the back/forward cache, or receives
+the browser's `online` hint, the hook immediately probes the socket and refetches
+its scoped queries before returning to `connected`.
 
 ### Server (`cf-sync-kit/server`)
 
@@ -694,7 +698,7 @@ individual status for each room.
 | `InferUpdate<C, K>` | Infer update type from collection config |
 | `InferEntity<C, K>` | Infer entity type from collection config |
 | `PendingMutationInfo` | Tracks pending optimistic mutations |
-| `ConnectionStatus` | `'connecting' \| 'connected' \| 'disconnected'` |
+| `ConnectionStatus` | `'connecting' \| 'reconnecting' \| 'synchronizing' \| 'connected' \| 'degraded' \| 'disconnected'` |
 | `SyncError` | Custom error class with code, status, and details |
 | `isSyncError(err)` | Type guard to check if error is a SyncError |
 | `defineCollections(config)` | Type-safe config helper |
