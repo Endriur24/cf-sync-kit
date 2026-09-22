@@ -68,15 +68,22 @@ export class MiddlewareSystem {
    * Executes all middleware in sequence.
    * @param ctx - Middleware context
    */
-  async execute(ctx: MiddlewareContext): Promise<void> {
-    let index = 0
-    const next = async () => {
-      if (index < this.middlewares.length) {
-        const middleware = this.middlewares[index++]
-        await middleware(ctx, next)
+  async execute(ctx: MiddlewareContext, operation: () => Promise<void> = async () => {}): Promise<void> {
+    let index = -1
+    const dispatch = async (position: number): Promise<void> => {
+      if (position <= index) throw new Error('next() called multiple times')
+      index = position
+
+      const middleware = this.middlewares[position]
+      if (middleware) {
+        await middleware(ctx, () => dispatch(position + 1))
+        return
       }
+
+      await operation()
     }
-    await next()
+
+    await dispatch(0)
   }
 
   /**

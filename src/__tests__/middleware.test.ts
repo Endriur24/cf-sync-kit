@@ -53,6 +53,7 @@ describe('MiddlewareSystem', () => {
   it('should stop execution if next() is not called', async () => {
     const system = new MiddlewareSystem()
     const called = vi.fn()
+    const operation = vi.fn(async () => {})
 
     system.use(async () => {
       // Don't call next
@@ -61,8 +62,36 @@ describe('MiddlewareSystem', () => {
       called()
     })
 
-    await system.execute(createMockContext())
+    await system.execute(createMockContext(), operation)
     expect(called).not.toHaveBeenCalled()
+    expect(operation).not.toHaveBeenCalled()
+  })
+
+  it('should execute the terminal operation inside the onion chain', async () => {
+    const system = new MiddlewareSystem()
+    const order: string[] = []
+
+    system.use(async (_ctx, next) => {
+      order.push('before')
+      await next()
+      order.push('after')
+    })
+
+    await system.execute(createMockContext(), async () => {
+      order.push('operation')
+    })
+
+    expect(order).toEqual(['before', 'operation', 'after'])
+  })
+
+  it('rejects calling next() more than once', async () => {
+    const system = new MiddlewareSystem()
+    system.use(async (_ctx, next) => {
+      await next()
+      await next()
+    })
+
+    await expect(system.execute(createMockContext())).rejects.toThrow('next() called multiple times')
   })
 
   it('should pass context to middleware', async () => {

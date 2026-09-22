@@ -156,43 +156,46 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     }
 
     let result: unknown
-    let broadcastId: number
+    let broadcastId: number | undefined
+    let operationReached = false
     try {
-      await this.middlewareSystem.execute(middlewareCtx)
-      // Reserve the sequence before the D1 write. A failed write intentionally leaves
-      // a gap, which makes connected clients refetch instead of silently going stale.
-      broadcastId = await this.broadcastSystem.getNextId(collection)
+      await this.middlewareSystem.execute(middlewareCtx, async () => {
+        operationReached = true
+        // Reserve the sequence before the D1 write. A failed write intentionally leaves
+        // a gap, which makes connected clients refetch instead of silently going stale.
+        broadcastId = await this.broadcastSystem.getNextId(collection)
 
-      switch (action) {
-        case 'insert':
-          result = await repo.create(syncId, payload as Record<string, unknown>)
-          break
-        case 'update': {
-          const data = payload as { id: string; data: Record<string, unknown> }
-          result = await repo.update(syncId, data.id, data.data, scope)
-          if (!result) throw new HTTPException(404, { message: 'Entity not found in this scope' })
-          break
+        switch (action) {
+          case 'insert':
+            result = await repo.create(syncId, payload as Record<string, unknown>)
+            break
+          case 'update': {
+            const data = payload as { id: string; data: Record<string, unknown> }
+            result = await repo.update(syncId, data.id, data.data, scope)
+            if (!result) throw new HTTPException(404, { message: 'Entity not found in this scope' })
+            break
+          }
+          case 'delete': {
+            const data = payload as { id: string }
+            const deleted = await repo.delete(syncId, data.id, scope)
+            if (!deleted) throw new HTTPException(404, { message: 'Entity not found in this scope' })
+            result = { id: data.id }
+            break
+          }
+          case 'bulk-insert':
+            result = await repo.bulkCreate(syncId, payload as Record<string, unknown>[])
+            break
+          case 'bulk-update':
+            result = await repo.bulkUpdate(syncId, payload as { id: string; data: Record<string, unknown> }[], scope)
+            break
+          case 'bulk-delete':
+            await repo.bulkDelete(syncId, payload as string[], scope)
+            result = { ids: payload }
+            break
+          default:
+            throw new HTTPException(400, { message: `Unknown action: ${action}` })
         }
-        case 'delete': {
-          const data = payload as { id: string }
-          const deleted = await repo.delete(syncId, data.id, scope)
-          if (!deleted) throw new HTTPException(404, { message: 'Entity not found in this scope' })
-          result = { id: data.id }
-          break
-        }
-        case 'bulk-insert':
-          result = await repo.bulkCreate(syncId, payload as Record<string, unknown>[])
-          break
-        case 'bulk-update':
-          result = await repo.bulkUpdate(syncId, payload as { id: string; data: Record<string, unknown> }[], scope)
-          break
-        case 'bulk-delete':
-          await repo.bulkDelete(syncId, payload as string[], scope)
-          result = { ids: payload }
-          break
-        default:
-          throw new HTTPException(400, { message: `Unknown action: ${action}` })
-      }
+      })
     } catch (error) {
       // DO RPC strips the HTTPException prototype, so we encode the status in the message.
       const status = (error as any)?.status
@@ -203,6 +206,10 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       log.error(`Mutation failed: ${collection}/${action}`, error)
       throw new HTTPException(500, { message: error instanceof Error ? error.message : 'Mutation failed' })
     }
+
+    // Middleware may intentionally short-circuit by not calling next(). In that case
+    // there was no database mutation to receipt or broadcast.
+    if (!operationReached) return undefined
 
     if (receiptKey) {
       await this.storage.put(receiptKey, { fingerprint, result })
