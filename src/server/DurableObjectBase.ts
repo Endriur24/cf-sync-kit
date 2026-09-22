@@ -5,6 +5,7 @@ import type { WsBroadcastEvent } from '../shared/events'
 import type { Repository } from './Repository'
 import { BroadcastSystem } from './BroadcastSystem'
 import { MiddlewareSystem, type MiddlewareContext } from './MiddlewareSystem'
+import { MutationQueue } from './MutationQueue'
 import { log } from '../shared/logger'
 import { HTTPException } from 'hono/http-exception'
 
@@ -29,9 +30,12 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   protected broadcastSystem: BroadcastSystem
   protected middlewareSystem: MiddlewareSystem
   private connections = new Set<string>()
+  private mutationQueue = new MutationQueue()
+  private readonly storage: DurableObjectStorage
 
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env)
+    this.storage = ctx.storage
     // Respond to liveness probes at the edge, including while the object is hibernated.
     // This prevents heartbeat traffic from waking the Durable Object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -113,8 +117,34 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     scope?: string,
     userId?: string
   ) {
+    return this.mutationQueue.enqueue(() => this.mutateInOrder(collection, action, syncId, payload, clientMutationId, scope, userId))
+  }
+
+  private async mutateInOrder(
+    collection: CollectionName,
+    action: ActionType,
+    syncId: string,
+    payload: unknown,
+    clientMutationId?: string,
+    scope?: string,
+    userId?: string
+  ) {
     const repo = this.repositories.get(collection)
     if (!repo) throw new HTTPException(400, { message: `Collection ${collection} not registered` })
+
+    const receiptKey = clientMutationId
+      ? `mutation_${collection}_${encodeURIComponent(clientMutationId)}`
+      : undefined
+    const fingerprint = JSON.stringify({ action, syncId, scope, payload })
+    if (receiptKey) {
+      const receipt = await this.storage.get<{ fingerprint: string; result: unknown }>(receiptKey)
+      if (receipt) {
+        if (receipt.fingerprint !== fingerprint) {
+          throw new HTTPException(409, { message: 'Mutation ID was already used with a different request' })
+        }
+        return receipt.result
+      }
+    }
 
     const middlewareCtx: MiddlewareContext = {
       collection,
@@ -126,8 +156,12 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     }
 
     let result: unknown
+    let broadcastId: number
     try {
       await this.middlewareSystem.execute(middlewareCtx)
+      // Reserve the sequence before the D1 write. A failed write intentionally leaves
+      // a gap, which makes connected clients refetch instead of silently going stale.
+      broadcastId = await this.broadcastSystem.getNextId(collection)
 
       switch (action) {
         case 'insert':
@@ -170,24 +204,24 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       throw new HTTPException(500, { message: error instanceof Error ? error.message : 'Mutation failed' })
     }
 
-    if (result) {
-      try {
-        const broadcastId = await this.broadcastSystem.getNextId(collection)
+    if (receiptKey) {
+      await this.storage.put(receiptKey, { fingerprint, result })
+    }
 
-        const event: WsBroadcastEvent = {
-          type: 'broadcast',
-          collection,
-          action,
-          payload: result,
-          broadcastId,
-          clientMutationId,
-          scope,
-        }
-
-        this.broadcast(JSON.stringify(event))
-      } catch (error) {
-        log.error('Failed to broadcast mutation result:', error)
+    try {
+      const event: WsBroadcastEvent = {
+        type: 'broadcast',
+        collection,
+        action,
+        payload: result,
+        broadcastId: broadcastId!,
+        clientMutationId,
+        scope,
       }
+      this.broadcast(JSON.stringify(event))
+    } catch (error) {
+      log.error('Mutation was committed but could not be broadcast:', error)
+      throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
     }
 
     return result

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-09-22
+
+### Added
+
+- Added durable mutation receipts keyed by `_clientMutationId`: retries return the original result without repeating the write or broadcast, and reuse with different request data returns HTTP 409.
+
+### Changed
+
+- Serialized mutations within each Durable Object room and reserve broadcast sequence IDs before D1 writes. Failed writes intentionally leave detectable sequence gaps, triggering client recovery rather than silent stale state.
+
+### Fixed
+
+- A committed mutation whose websocket publication fails now returns HTTP 503 and can be safely retried with the same mutation ID.
+
 ## [0.25.1] - 2026-09-22
 
 ### Fixed
