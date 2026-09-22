@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.8] - 2026-09-22
+
+### Fixed
+
+- Kept bulk deletes within D1's 100-bound-parameter limit by reserving parameters for `syncId`, optional scope, and soft-delete values.
+- Validated every bulk-update statement independently and now report an actionable error before sending an over-wide query to D1.
+
 ## [0.26.7] - 2026-09-22
 
 ### Fixed

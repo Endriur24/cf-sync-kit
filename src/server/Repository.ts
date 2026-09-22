@@ -20,6 +20,25 @@ function getTableColumn(table: AnySQLiteTable, columnName: string): Column {
  */
 type DynamicInsertValue = Record<string, unknown>
 
+const D1_MAX_BOUND_PARAMETERS = 100
+
+export function getBulkDeleteBatchSize(options: {
+  singleTenant: boolean
+  scoped: boolean
+  softDelete: boolean
+}) {
+  const fixedParameters = (options.singleTenant ? 0 : 1) + (options.scoped ? 1 : 0) + (options.softDelete ? 1 : 0)
+  return Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedParameters)
+}
+
+export function assertD1ParameterLimit(operation: string, parameterCount: number) {
+  if (parameterCount > D1_MAX_BOUND_PARAMETERS) {
+    throw new Error(
+      `[Repository.${operation}] A single query requires ${parameterCount} bound parameters; D1 allows at most ${D1_MAX_BOUND_PARAMETERS}`
+    )
+  }
+}
+
 export class Repository<TTable extends AnySQLiteTable> {
   protected db: DrizzleD1Database
   public readonly syncIdColumn: string
@@ -255,11 +274,17 @@ export class Repository<TTable extends AnySQLiteTable> {
     const now = new Date()
     const allResults: unknown[] = []
 
-    // Calculate params per query: id (1) + syncId (1 if not singleTenant) + data keys + updatedAt (1 if autoTimestamp)
-    // Use the first item to estimate, then cap conservatively
-    const firstDataKeys = Object.keys(items[0]?.data || {}).length
-    const paramsPerQuery = 1 + (this.singleTenant ? 0 : 1) + firstDataKeys + (this.autoTimestamp ? 1 : 0)
-    const batchSize = Math.max(1, Math.floor(90 / Math.max(1, paramsPerQuery)))
+    // D1 applies the 100-parameter limit to every statement inside db.batch(),
+    // not to the batch as a whole. Validate every differently-shaped item.
+    for (const item of items) {
+      this.assertMutableData(item.data)
+      const updateKeys = new Set(Object.keys(item.data))
+      if (this.autoTimestamp) updateKeys.add('updatedAt')
+      const whereParameters = 1 + (this.singleTenant ? 0 : 1) + (scope === undefined ? 0 : 1)
+      assertD1ParameterLimit('bulkUpdate', updateKeys.size + whereParameters)
+    }
+
+    const batchSize = 50
 
     for (let i = 0; i < items.length; i += batchSize) {
       const batch = items.slice(i, i + batchSize)
@@ -267,7 +292,6 @@ export class Repository<TTable extends AnySQLiteTable> {
       try {
         const queries = batch.map((item) => {
           const { id, data } = item
-          this.assertMutableData(data)
           const updateData: Record<string, unknown> = {
             ...data,
             ...(this.autoTimestamp ? { updatedAt: now } : {}),
@@ -303,7 +327,11 @@ export class Repository<TTable extends AnySQLiteTable> {
   async bulkDelete(syncId: string, ids: string[], scope?: string) {
     if (ids.length === 0) return
 
-    const batchSize = 100
+    const batchSize = getBulkDeleteBatchSize({
+      singleTenant: this.singleTenant,
+      scoped: scope !== undefined,
+      softDelete: Boolean(this.softDeleteColumn),
+    })
     for (let i = 0; i < ids.length; i += batchSize) {
       const batch = ids.slice(i, i + batchSize)
       try {
