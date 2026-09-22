@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect } from 'react'
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import type { CollectionsMap, InferInsert, InferUpdate, InferEntity, PendingMutationInfo } from '../../shared/types'
 import { SyncError, DEFAULT_SYNC_ID } from '../../shared/types'
 import { applyMutationToCache } from './cacheUpdater'
@@ -53,6 +54,10 @@ function isRetryableError(error: unknown): boolean {
 function retryDelay(failureCount: number): number {
   const delay = Math.min(1000 * 2 ** failureCount, 10000)
   return delay + Math.random() * 200
+}
+
+export async function recoverOptimisticCache(queryClient: QueryClient, queryKey: readonly unknown[]) {
+  await queryClient.invalidateQueries({ queryKey })
 }
 
 async function apiFetch<T = unknown>(path: string, apiPrefix: string, init?: RequestInit): Promise<T> {
@@ -230,7 +235,6 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   options: UseCollectionOptions | undefined
 ) {
   type MutationContext = {
-    previousData: Entity[] | undefined
     optimisticId?: string
     optimisticIds?: string[]
   }
@@ -284,13 +288,13 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   }
 
   const makeOnError = useCallback(
-    (label: string) => (err: SyncError, _variables: any, context?: MutationContext) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKey, context.previousData)
-      }
+    (label: string) => async (err: SyncError) => {
+      // A full snapshot rollback can erase another mutation that completed while
+      // this request was in flight. Refetch the authoritative collection instead.
+      if (optimisticUpdates) await recoverOptimisticCache(queryClient, queryKey)
       logError(`${label} error:`, err)
     },
-    [queryClient, queryKey, logError]
+    [optimisticUpdates, queryClient, queryKey, logError]
   )
 
   const makeOnSettled = useCallback(
@@ -336,17 +340,16 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       const optimisticId = variables._entityId
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'insert', entityId: optimisticId })
       if (optimisticUpdates) {
         const optimisticEntity = { ...variables.data, id: optimisticId } as unknown as Entity
         queryClient.setQueryData<Entity[]>(queryKey, (old) => [optimisticEntity, ...(old ?? [])])
         log('Optimistic add:', variables.data)
-        return { previousData, optimisticId: optimisticEntity.id }
+        return { optimisticId: optimisticEntity.id }
       }
       log('Pessimistic add (waiting for server):', variables.data)
-      return { previousData }
+      return {}
     },
     onSuccess: (result, _variables, context) => {
       const entity = result.data
@@ -379,7 +382,6 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { entityId: variables.id, action: 'update' })
       if (optimisticUpdates) {
         queryClient.setQueryData<Entity[]>(
@@ -402,7 +404,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       } else {
         log('Pessimistic update (waiting for server):', variables.id)
       }
-      return { previousData }
+      return {}
     },
     onSuccess: (result) => {
       const entity = result.data
@@ -433,7 +435,6 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { entityId: variables.id, action: 'delete' })
       if (optimisticUpdates) {
         queryClient.setQueryData<Entity[]>(
@@ -447,7 +448,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       } else {
         log('Pessimistic remove (waiting for server):', variables.id)
       }
-      return { previousData }
+      return {}
     },
     onSuccess: (_result, variables) => {
       applyMutationToCache(queryClient, collection, syncId, scope, 'delete', { id: variables.id })
@@ -475,14 +476,13 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'bulk-insert' })
       if (optimisticUpdates) {
         const optimisticEntities = variables.items.map((item, index) => ({ ...item, id: variables._entityIds[index] })) as unknown as Entity[]
         queryClient.setQueryData<Entity[]>(queryKey, (old) => [...optimisticEntities, ...(old ?? [])])
-        return { previousData, optimisticIds: optimisticEntities.map(e => e.id) }
+        return { optimisticIds: optimisticEntities.map(e => e.id) }
       }
-      return { previousData }
+      return {}
     },
     onSuccess: (result, _variables, context) => {
       applyMutationToCache(
@@ -513,7 +513,6 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'bulk-update' })
       if (optimisticUpdates) {
         queryClient.setQueryData<Entity[]>(queryKey, (old) => {
@@ -525,7 +524,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
           })
         })
       }
-      return { previousData }
+      return {}
     },
     onSuccess: (result) => {
       if (!result.data?.length) return
@@ -553,7 +552,6 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     ...retryConfig,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
-      const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'bulk-delete' })
       if (optimisticUpdates) {
         const idsToDelete = new Set(variables.ids)
@@ -561,7 +559,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
           (old ?? []).filter((item) => !idsToDelete.has(item.id))
         )
       }
-      return { previousData }
+      return {}
     },
     onSuccess: (_result, variables) => {
       applyMutationToCache(queryClient, collection, syncId, scope, 'bulk-delete', variables.ids)
