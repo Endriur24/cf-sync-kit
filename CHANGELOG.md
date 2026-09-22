@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.11] - 2026-09-22
+
+### Documentation
+
+- Clarified that `syncId`, not `scope`, is the authorization and confidentiality boundary; scope filtering happens in D1 queries and client caches while room members can receive complete broadcast payloads.
+- Documented WebSocket authorization exports, the three authorization layers, authoritative optimistic-error recovery, stable insert retry IDs, current D1 bulk limits, and real workerd test commands.
+- Corrected the quick-start update schema so tenant and server-managed timestamp columns cannot be submitted by clients.
+
 ## [0.26.10] - 2026-09-22
 
 ### Added

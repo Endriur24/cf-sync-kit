@@ -5,10 +5,11 @@ A real-time synchronization framework for Cloudflare Workers with Durable Object
 ## Features
 
 - **Real-time sync** via WebSockets (PartySocket) with broadcast ordering
-- **Optimistic updates** with automatic rollback on failure (TanStack Query)
+- **Optimistic updates** with authoritative cache recovery on failure (TanStack Query)
 - **Type-safe** CRUD operations inferred from Drizzle + Zod schemas
 - **Multi-tenant isolation** via syncId scoping
-- **Scope filtering** for shared WebSocket/DO isolation and targeted server-side D1 SQL queries
+- **Scope filtering** for targeted D1 queries and client cache selection within a `syncId`
+- **WebSocket authorization** before Durable Object routing with defense-in-depth connection checks
 - **Server-side ordering** via `orderByColumn` & `orderDirection` (defaults to `createdAt` or `id` descending)
 - **Middleware system** for auth, logging
 - **Health check endpoint** for monitoring (`GET /health`)
@@ -45,7 +46,7 @@ Then pick an example that matches your use case:
 
 ```bash
 cd example/todo-app          # Basic single-tenant app (no syncId column)
-# cd example/scoped-todos-app  # Single-tenant with scope-based broadcast isolation
+# cd example/scoped-todos-app  # Single-tenant with scope-filtered queries and client caches
 # cd example/auth-todo-app     # Per-user auth with user-scoped todos
 # cd example/project-roles-todo-app  # Project-based role permissions
 # cd example/bulk-todo         # Bulk operations demo
@@ -99,7 +100,7 @@ export const collectionsConfig = defineCollections({
     table: todosTable,
     syncIdColumn: 'project_id',  // tells framework which column is the sync/tenant ID
     insertSchema: createInsertSchema(todosTable).omit({ id: true, createdAt: true, updatedAt: true, project_id: true }),
-    updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
+    updateSchema: createInsertSchema(todosTable).omit({ id: true, project_id: true, createdAt: true, updatedAt: true }).partial(),
     selectSchema: createSelectSchema(todosTable),
   },
 })
@@ -134,6 +135,16 @@ By default, scope filtering looks for a column named `scope`. Use `scopeColumn` 
 ```ts
 // Custom scope column name
 scopeColumn: 'list_id'
+```
+
+`scope` is a query and client-cache filter, not an authorization boundary. Every authorized WebSocket connected to the same `syncId` receives the room's broadcast frames, including their payloads. Use a different `syncId` whenever data must not be visible to another client.
+
+#### ownerColumn
+
+If ownership is stored under a name other than `ownerId`, configure `ownerColumn`. The router uses it for server-side ownership injection and protects it from client mutation:
+
+```ts
+ownerColumn: 'created_by'
 ```
 
 #### orderByColumn & orderDirection
@@ -277,8 +288,9 @@ export function getRoom(env: Bindings, syncId: string) {
 > | **syncId format** | Must match the authenticated `userId` exactly. If not → **403 Forbidden** on every mutation |
 > | **Table column** | Must have a sync isolation column (e.g. `owner_id`). Set via `syncIdColumn`. If missing → **DB error** on insert |
 > | **Data model** | Each user has isolated data — no sharing between users |
+> | **WebSocket routing** | Use `createWebSocketHandler` with an authorizer that returns the verified user ID. The preset checks that it equals the room `syncId` |
 >
-> **Do NOT use this preset** if you need shared scopes (projects, teams). Use custom middleware instead.
+> **Do NOT use this preset** if multiple users share a `syncId` room (projects, teams). Use custom middleware and a matching WebSocket authorizer instead.
 
 #### Custom Database Binding Name
 
@@ -504,7 +516,7 @@ Note: `refetchOnSuccess` can be used together with `consistentReads: true` for m
 
 #### Optimistic vs Pessimistic Updates
 
-By default, all mutations are **optimistic** — the UI updates immediately before the server responds, providing instant feedback. If the server rejects the mutation, the cache is automatically rolled back.
+By default, all mutations are **optimistic** — the UI updates immediately before the server responds, providing instant feedback. If the server rejects the mutation, the affected query is invalidated and refetched from the authoritative server state. This avoids restoring a stale whole-cache snapshot over another mutation that completed concurrently.
 
 For critical operations where you want to wait for server confirmation before showing changes to the user, use pessimistic mode:
 
@@ -514,7 +526,7 @@ const { data, update, isUpdating } = useCollection('todos', syncId, undefined, {
   optimisticUpdates: false
 })
 
-// Optimistic (default): UI updates instantly, rolls back on error
+// Optimistic (default): UI updates instantly, refetches authoritative state on error
 const { data, update, isUpdating } = useCollection('todos', syncId)
 ```
 
@@ -671,6 +683,8 @@ socket and refetches its scoped queries before returning to `connected`.
 |--------|-------------|
 | `createDurableObject(config, opts)` | **Factory** — creates DO class with auto-registered repos. Supports `preset: 'per-user'` for quick setup |
 | `createGetRoomFn(namespace)` | **Factory** — creates typed room resolver |
+| `createWebSocketHandler(namespace, options)` | Routes WebSocket upgrades with an explicit `authorize` callback or `{ public: true }` |
+| `requireWebSocketUser(getUserId)` | Per-user WebSocket authorizer requiring `userId === syncId` |
 | `DurableObjectBase` | Base class for custom Durable Objects |
 | `Repository` | CRUD operations for a Drizzle table |
 | `createSyncApi(collections, getRoom, options?)` | Creates Hono app with `/:syncId/:collection` sync endpoints |
@@ -688,7 +702,8 @@ socket and refetches its scoped queries before returning to `connected`.
 | `Middleware` | Middleware function type |
 | `RoomMutator` | Interface for DO room mutation methods |
 | `GetRoomFn` | Type for room resolver function |
-| `CollectionRouterOptions` | Options for `createSyncApi` (includes `dbName` for custom D1 binding) |
+| `CollectionRouterOptions` | Options for `createSyncApi` (including `dbName`, `ownerColumn`, and access validation) |
+| `WebSocketHandlerOptions` | WebSocket route options, including party restriction and explicit access mode |
 
 ### Shared Types
 
@@ -708,7 +723,7 @@ socket and refetches its scoped queries before returning to `connected`.
 
 ## Authorization
 
-cf-sync-kit provides a two-layer authorization system with **server-side ownership injection**.
+cf-sync-kit supports three authorization layers with **server-side ownership injection**: HTTP reads/writes, mutation defense inside the Durable Object, and WebSocket broadcast subscriptions.
 
 ### Security Principle
 
@@ -761,12 +776,13 @@ export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, 
 | **Update** | Ownership enforced by syncId isolation (`createSyncAccessMiddleware`) |
 | **Delete** | Ownership enforced by syncId isolation (`createSyncAccessMiddleware`) |
 
-### Why two layers?
+### Why separate layers?
 
 | Layer | Protects | When it runs |
 |-------|----------|--------------|
 | Router | GET, POST, PUT, DELETE | Before reaching DO |
 | DO Middleware | Mutations only | Inside DO, before DB write |
+| WebSocket handler | Broadcast subscription | Before upgrade routing to DO |
 
 The router layer prevents unauthorized reads. The DO layer provides defense-in-depth for mutations (useful if you have other entry points to the DO).
 
@@ -787,9 +803,9 @@ app.all('/parties/:party/:roomId', (c) =>
 
 The handler removes client-supplied internal identity headers, authorizes before invoking the Durable Object, and forwards only the verified identity. The `per-user` Durable Object preset verifies that identity again and requires it to equal the room `syncId`. For intentionally public rooms use `{ public: true }` explicitly.
 
-### Shared scopes
+### Shared sync IDs
 
-For shared sync scopes where multiple users access the same syncId, add custom middleware that queries the database to verify record ownership:
+For shared rooms where multiple users access the same `syncId`, apply the same membership rule to HTTP, Durable Object mutations, and WebSocket upgrades:
 
 ```ts
 // Router layer
@@ -803,6 +819,17 @@ validateSyncAccess: async (userId, syncId) => {
 // DO layer
 createSyncAccessMiddleware(async (userId, syncId) => {
   // Same logic as above
+})
+
+// WebSocket layer
+createWebSocketHandler(env.PROJECT_ROOM, {
+  authorize: async ({ request, syncId }) => {
+    const userId = await authenticate(request)
+    if (!await canAccessTeam(userId, syncId)) {
+      return new Response('Forbidden', { status: 403 })
+    }
+    return userId
+  },
 })
 ```
 
@@ -1062,12 +1089,12 @@ const syncApi = createSyncApi(collectionsConfig, getRoom, {
 
 ## Scope Feature
 
-Scopes allow multiple logical sub-groups (e.g. todo lists, channels, categories) to share the same WebSocket connection and Durable Object instance while maintaining isolated data fetching and real-time broadcasts.
+Scopes allow multiple logical sub-groups (e.g. todo lists, channels, categories) to share the same WebSocket connection and Durable Object instance while keeping D1 queries and client caches focused on one subgroup.
 
 When `scope` is specified in `useCollection(collectionName, syncId, scope)`:
 
 1. **Server-Side D1 SQL Filtering**: Initial `GET` requests append `?scope=...` to query parameters. The server executes a targeted SQL query (`WHERE scope = ?`) in Cloudflare D1, returning only records belonging to that scope — saving D1 Read Units and reducing payload size.
-2. **Real-Time Broadcast Isolation**: WebSocket messages carry the `scope` property. Clients automatically filter out real-time events for other scopes, preventing unnecessary React Query cache invalidation and component re-renders.
+2. **Client-side broadcast filtering**: WebSocket messages carry the `scope` property. Every socket authorized for the `syncId` can receive the raw event, while hooks ignore events for other scopes to avoid unnecessary cache updates and renders.
 
 ```ts
 // Client: each list / subpage fetches only its targeted scope data
@@ -1077,6 +1104,8 @@ useCollection('scopedTodos', undefined, listIdB) // GET /default/scopedTodos?sco
 ```
 
 > **Tip:** When using scopes with foreign keys (e.g. `scope` references `lists.id`), use the raw ID as the scope value — not a prefixed string. This ensures the FK constraint is satisfied. You can customize the column name using `scopeColumn` in collection config.
+
+> **Security:** `scope` is not a privacy or authorization boundary. Separate confidential groups into different `syncId` rooms and authorize both their HTTP requests and WebSocket upgrades.
 
 ## Performance & Consistency Trade-offs
 
@@ -1117,23 +1146,25 @@ The Repository automatically sets `createdAt` and `updatedAt` on `create`/`bulkC
 
 ### Bulk Operations Partial Failure Behavior
 
-Bulk operations (`addMany`, `updateMany`, `removeMany`) are automatically batched to stay within D1's ~100 bound parameters limit. The batch size is calculated dynamically based on table column count:
+Bulk operations (`addMany`, `updateMany`, `removeMany`) are batched to stay within D1's limit of 100 bound parameters per individual statement:
 
 - **`addMany`**: Uses `INSERT ... VALUES (...), (...), ...` with dynamic batch size (~5-18 items depending on columns). Each batch is a separate query.
-- **`updateMany`**: Uses `db.batch([...])` to send multiple `UPDATE` queries in a single request. D1 executes them sequentially in an implicit transaction — if any statement fails, the entire batch is rolled back.
-- **`removeMany`**: Uses `DELETE ... WHERE id IN (...)` with batches of up to 100 IDs.
+- **`updateMany`**: Validates every differently shaped update against the per-statement limit and sends chunks of statements through `db.batch([...])`.
+- **`removeMany`**: Reserves parameters for `syncId`, optional scope, and soft-delete values before choosing the `IN (...)` chunk size.
 
 **Partial failure semantics:**
 - **If batch 1 succeeds but batch 2 fails**: Batch 1 results are committed. For `updateMany`, the failed batch is fully rolled back (D1 transaction). For `addMany`/`removeMany`, the failed batch is not applied.
-- **Client cache**: On failure, the entire optimistic update is rolled back to `previousData`. The cache may temporarily diverge from the server until the next broadcast or refetch.
-- **Retry behavior**: Failed batches retry with exponential backoff (same as single operations). If retries succeed, the broadcast will reconcile any cache divergence.
+- **Client cache**: On failure, the query is invalidated and refetched. A stale snapshot is never restored over concurrently successful mutations.
+- **Retry behavior**: A mutation reuses its `_clientMutationId`. Inserts also reuse stable entity IDs, so retrying a partially completed `addMany` does not create duplicate rows. Durable Object receipts return the original result after a completed mutation.
 
-For critical operations where all-or-nothing semantics are required, use single operations or implement idempotency keys in your application logic.
+Bulk calls are not atomic across multiple D1 chunks. For operations requiring all-or-nothing semantics across the entire input, implement a domain transaction or dedicated server operation.
 
 ## Running Tests
 
 ```bash
 npm test          # Run once
+npm run test:unit # Node unit/integration tests
+npm run test:worker # Real workerd tests with Durable Objects, D1, and WebSockets
 npm run test:watch # Watch mode
 ```
 
@@ -1180,12 +1211,12 @@ Response:
 
 - **GET (reads)**: by default go directly from the Worker to D1, bypassing the Durable Object for performance. Enable `consistentReads: true` (or `?consistent=true`) to route reads through the DO instead.
 - **Mutations (POST/PUT/DELETE)**: always go through the Worker → DO → D1. The DO then broadcasts the change to all connected WebSocket clients.
-- Each `syncId` maps to one Durable Object instance. All clients connecting to the same sync scope share the same DO and receive real-time broadcasts.
+- Each `syncId` maps to one Durable Object instance. All clients authorized for the same `syncId` share the DO and can receive its complete broadcast payloads; `scope` filtering on the client does not provide confidentiality.
 
 ## Examples
 
 - `example/todo-app` — Basic todo app with single-tenant mode (no syncId column)
 - `example/bulk-todo` — Bulk operations
-- `example/scoped-todos-app` — Single-tenant app with scope-based broadcast isolation per list
+- `example/scoped-todos-app` — Single-tenant app with scope-filtered D1 queries and client caches
 - `example/auth-todo-app` — Basic auth with user-scoped todos
 - `example/project-roles-todo-app` — Project-based role permissions
