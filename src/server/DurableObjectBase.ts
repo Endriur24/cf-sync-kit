@@ -135,12 +135,14 @@ export abstract class DurableObjectBase extends Server<Bindings> {
           break
         case 'update': {
           const data = payload as { id: string; data: Record<string, unknown> }
-          result = await repo.update(syncId, data.id, data.data)
+          result = await repo.update(syncId, data.id, data.data, scope)
+          if (!result) throw new HTTPException(404, { message: 'Entity not found in this scope' })
           break
         }
         case 'delete': {
           const data = payload as { id: string }
-          await repo.delete(syncId, data.id)
+          const deleted = await repo.delete(syncId, data.id, scope)
+          if (!deleted) throw new HTTPException(404, { message: 'Entity not found in this scope' })
           result = { id: data.id }
           break
         }
@@ -148,10 +150,10 @@ export abstract class DurableObjectBase extends Server<Bindings> {
           result = await repo.bulkCreate(syncId, payload as Record<string, unknown>[])
           break
         case 'bulk-update':
-          result = await repo.bulkUpdate(syncId, payload as { id: string; data: Record<string, unknown> }[])
+          result = await repo.bulkUpdate(syncId, payload as { id: string; data: Record<string, unknown> }[], scope)
           break
         case 'bulk-delete':
-          await repo.bulkDelete(syncId, payload as string[])
+          await repo.bulkDelete(syncId, payload as string[], scope)
           result = { ids: payload }
           break
         default:

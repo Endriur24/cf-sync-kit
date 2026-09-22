@@ -1,6 +1,5 @@
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
-import { zValidator } from '@hono/zod-validator'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and, isNull, asc, desc } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
@@ -105,9 +104,18 @@ export interface CollectionHandlers {
   bulkDelete: (c: Context) => Promise<Response>
 }
 
-  // zValidator is invoked manually inside handlers, so TypeScript cannot infer
-  // validated data on the context. Use a small helper to read it back.
-  const getValidated = (c: Context, target: 'json' | 'query'): any => (c.req.valid as any)(target)
+async function parseJson(c: Context, schema: z.ZodType): Promise<any> {
+  const body = await c.req.json().catch(() => undefined)
+  const result = await schema.safeParseAsync(body)
+  if (!result.success) throw new HTTPException(400, { message: 'Validation failed' })
+  return result.data
+}
+
+async function parseQuery(c: Context, schema: z.ZodType): Promise<any> {
+  const result = await schema.safeParseAsync(c.req.query())
+  if (!result.success) throw new HTTPException(400, { message: 'Validation failed' })
+  return result.data
+}
 
 /**
  * Creates handlers for a single collection. The handlers are not a Hono router;
@@ -178,6 +186,12 @@ export function createCollectionHandlers(
     }
   }
 
+  const assertNoProtectedFields = (data: Record<string, unknown>) => {
+    const protectedFields = ['id', 'ownerId', syncIdColumn, scopeColumn]
+    const field = protectedFields.find((name) => name in data)
+    if (field) throw new HTTPException(400, { message: `Field "${field}" cannot be set by the client` })
+  }
+
   const getSyncIdFromParam = (c: Context) => {
     const syncId = c.req.param('syncId')
     return resolveSyncId(syncId)
@@ -208,7 +222,7 @@ export function createCollectionHandlers(
         const conditions = []
 
         if (!singleTenant) conditions.push(eq((table as any)[syncIdColumn], syncId))
-        if (scope && scopeColumn in (table as any)) conditions.push(eq((table as any)[scopeColumn], scope))
+        if (scope !== undefined && scopeColumn in (table as any)) conditions.push(eq((table as any)[scopeColumn], scope))
         if (softDeleteCol) conditions.push(isNull((table as any)[softDeleteCol]))
 
         let query = db.select().from(table)
@@ -235,40 +249,39 @@ export function createCollectionHandlers(
     },
 
     create: async (c: Context) => {
-      await zValidator('json', insertSchema.and(syncMetaSchema))(c, async () => {})
-      const body = getValidated(c, 'json')
+      const body = await parseJson(c, insertSchema.and(syncMetaSchema))
       const syncId = getSyncIdFromParam(c)
       const { _clientMutationId, scope, data } = extractMeta(body)
+      assertNoProtectedFields(data)
       const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
       // Inject ownerId on the backend — never trust client-provided owner fields
       // scope is always preserved for broadcast filtering
-      const payload = singleTenant
-        ? scope ? { ...data, scope } : { ...data }
-        : scope ? { ...data, scope, ownerId: userId } : { ...data, ownerId: userId }
+      const payload = {
+        ...data,
+        ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
+        ...(!singleTenant ? { ownerId: userId } : {}),
+      }
       const result = await room.mutate(collection, 'insert', syncId, payload, _clientMutationId, scope, userId)
       return c.json({ success: true, data: result })
     },
 
     update: async (c: Context) => {
-      await zValidator('json', updateSchema.and(syncMetaSchema))(c, async () => {})
+      const body = await parseJson(c, updateSchema.and(syncMetaSchema))
       const { id } = c.req.param()
-      const body = getValidated(c, 'json')
       const syncId = getSyncIdFromParam(c)
       const { _clientMutationId, scope, data } = extractMeta(body)
+      assertNoProtectedFields(data)
       const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
-      // Strip ownerId from update payload — never trust client-provided owner fields
-      const { ownerId: _stripped, ...cleanData } = data as Record<string, unknown>
-      const payload = scope ? { ...cleanData, scope } : cleanData
-      const result = await room.mutate(collection, 'update', syncId, { id, data: payload }, _clientMutationId, scope, userId)
+      const result = await room.mutate(collection, 'update', syncId, { id, data }, _clientMutationId, scope, userId)
       return c.json({ success: true, data: result })
     },
 
     remove: async (c: Context) => {
-      await zValidator('query', syncMetaSchema)(c, async () => {})
+      const query = await parseQuery(c, syncMetaSchema)
       const { id } = c.req.param()
-      const { _clientMutationId, scope } = getValidated(c, 'query')
+      const { _clientMutationId, scope } = query
       const syncId = getSyncIdFromParam(c)
       const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
@@ -277,8 +290,7 @@ export function createCollectionHandlers(
     },
 
     bulkCreate: async (c: Context) => {
-      await zValidator('json', bulkInsertSchema(insertSchema))(c, async () => {})
-      const body = getValidated(c, 'json')
+      const body = await parseJson(c, bulkInsertSchema(insertSchema))
       const syncId = getSyncIdFromParam(c)
       const { _clientMutationId, scope, items } = body
       const userId = await ensureAccess(c, syncId)
@@ -287,10 +299,10 @@ export function createCollectionHandlers(
       console.debug(`[cf-sync-kit] bulk-insert "${collection}" for syncId="${syncId}": ${items.length} items`)
 
       const payload = (items as Record<string, unknown>[]).map(item => {
-        const { ownerId: _stripped, ...cleanItem } = item
+        assertNoProtectedFields(item)
         return {
-          ...cleanItem,
-          ...(scope && { scope }),
+          ...item,
+          ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
           ...(!singleTenant && { ownerId: userId })
         }
       })
@@ -300,8 +312,7 @@ export function createCollectionHandlers(
     },
 
     bulkUpdate: async (c: Context) => {
-      await zValidator('json', bulkUpdateSchema(updateSchema))(c, async () => {})
-      const body = getValidated(c, 'json')
+      const body = await parseJson(c, bulkUpdateSchema(updateSchema))
       const syncId = getSyncIdFromParam(c)
       const { _clientMutationId, scope, items } = body
       const userId = await ensureAccess(c, syncId)
@@ -310,11 +321,10 @@ export function createCollectionHandlers(
       console.debug(`[cf-sync-kit] bulk-update "${collection}" for syncId="${syncId}": ${items.length} items`)
 
       const payload = (items as { id: string; data: Record<string, unknown> }[]).map(({ id, data }) => {
-        // Strip ownerId from update payload — never trust client-provided owner fields
-        const { ownerId: _stripped, ...cleanData } = data
+        assertNoProtectedFields(data)
         return {
           id,
-          data: scope ? { ...cleanData, scope } : cleanData,
+          data,
         }
       })
 
@@ -323,8 +333,7 @@ export function createCollectionHandlers(
     },
 
     bulkDelete: async (c: Context) => {
-      await zValidator('json', bulkDeleteSchema)(c, async () => {})
-      const body = getValidated(c, 'json')
+      const body = await parseJson(c, bulkDeleteSchema)
       const syncId = getSyncIdFromParam(c)
       const { _clientMutationId, scope, ids } = body
       const userId = await ensureAccess(c, syncId)

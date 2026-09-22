@@ -67,7 +67,7 @@ export class Repository<TTable extends AnySQLiteTable> {
   private buildWhere(syncId: string, additionalCondition?: any, scope?: string) {
     const conditions = []
     if (!this.singleTenant) conditions.push(eq(getTableColumn(this.table, this.syncIdColumn), syncId))
-    if (scope && this.scopeColumn in (this.table as any)) {
+    if (scope !== undefined && this.scopeColumn in (this.table as any)) {
       conditions.push(eq(getTableColumn(this.table, this.scopeColumn), scope))
     }
     if (additionalCondition) conditions.push(additionalCondition)
@@ -76,6 +76,13 @@ export class Repository<TTable extends AnySQLiteTable> {
     if (conditions.length === 0) return undefined
     if (conditions.length === 1) return conditions[0]
     return and(...conditions)
+  }
+
+  private assertMutableData(data: Record<string, unknown>) {
+    const protectedFields = ['id', this.syncIdColumn, this.scopeColumn, 'createdAt', this.softDeleteColumn]
+      .filter((field): field is string => Boolean(field))
+    const field = protectedFields.find((name) => name in data)
+    if (field) throw new Error(`[Repository] Field "${field}" cannot be changed after creation`)
   }
 
   /**
@@ -125,7 +132,8 @@ export class Repository<TTable extends AnySQLiteTable> {
    * Updates an entity by id, scoped to syncId (unless singleTenant mode).
    * Automatically sets updatedAt timestamp when autoTimestamp is enabled.
    */
-  async update(syncId: string, id: string, data: Record<string, unknown>) {
+  async update(syncId: string, id: string, data: Record<string, unknown>, scope?: string) {
+    this.assertMutableData(data)
     const updateData: Record<string, unknown> = {
       ...data,
       ...(this.autoTimestamp ? { updatedAt: new Date() } : {}),
@@ -135,7 +143,7 @@ export class Repository<TTable extends AnySQLiteTable> {
       const results = await this.db
         .update(this.table)
         .set(updateData)
-        .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id)))
+        .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id), scope))
         .returning()
       return results[0] || null
     } catch (error) {
@@ -147,16 +155,19 @@ export class Repository<TTable extends AnySQLiteTable> {
   /**
    * Deletes an entity by id, scoped to syncId (unless singleTenant mode).
    */
-  async delete(syncId: string, id: string) {
-    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id))
+  async delete(syncId: string, id: string, scope?: string) {
+    const whereClause = this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id), scope)
     try {
       if (this.softDeleteColumn) {
-        await this.db
+        const results = await this.db
           .update(this.table)
-          .set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
+          .set({ [this.softDeleteColumn]: new Date() } as any)
           .where(whereClause)
+          .returning()
+        return results[0] || null
       } else {
-        await this.db.delete(this.table).where(whereClause)
+        const results = await this.db.delete(this.table).where(whereClause).returning()
+        return results[0] || null
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -181,7 +192,7 @@ export class Repository<TTable extends AnySQLiteTable> {
 
     // Use table column count (not payload keys) since drizzle includes default columns in INSERT
     const columnsCount = Object.keys(this.table).length
-    const batchSize = Math.max(5, Math.floor(90 / columnsCount))
+    const batchSize = Math.max(1, Math.floor(90 / Math.max(1, columnsCount)))
     const allResults: unknown[] = []
 
     try {
@@ -209,7 +220,7 @@ export class Repository<TTable extends AnySQLiteTable> {
    *
    * Expects items in format: { id: string, data: Record<string, unknown> }
    */
-  async bulkUpdate(syncId: string, items: { id: string; data: Record<string, unknown> }[]) {
+  async bulkUpdate(syncId: string, items: { id: string; data: Record<string, unknown> }[], scope?: string) {
     if (items.length === 0) return []
 
     const now = new Date()
@@ -219,7 +230,7 @@ export class Repository<TTable extends AnySQLiteTable> {
     // Use the first item to estimate, then cap conservatively
     const firstDataKeys = Object.keys(items[0]?.data || {}).length
     const paramsPerQuery = 1 + (this.singleTenant ? 0 : 1) + firstDataKeys + (this.autoTimestamp ? 1 : 0)
-    const batchSize = Math.max(5, Math.floor(90 / paramsPerQuery))
+    const batchSize = Math.max(1, Math.floor(90 / Math.max(1, paramsPerQuery)))
 
     for (let i = 0; i < items.length; i += batchSize) {
       const batch = items.slice(i, i + batchSize)
@@ -227,6 +238,7 @@ export class Repository<TTable extends AnySQLiteTable> {
       try {
         const queries = batch.map((item) => {
           const { id, data } = item
+          this.assertMutableData(data)
           const updateData: Record<string, unknown> = {
             ...data,
             ...(this.autoTimestamp ? { updatedAt: now } : {}),
@@ -235,7 +247,7 @@ export class Repository<TTable extends AnySQLiteTable> {
           return this.db
             .update(this.table)
             .set(updateData)
-            .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id)))
+            .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), id), scope))
             .returning()
         })
 
@@ -259,19 +271,19 @@ export class Repository<TTable extends AnySQLiteTable> {
    * Deletes multiple entities by their ids.
    * Batches DELETE queries with IN() clauses to stay within D1's bound parameters limit.
    */
-  async bulkDelete(syncId: string, ids: string[]) {
+  async bulkDelete(syncId: string, ids: string[], scope?: string) {
     if (ids.length === 0) return
 
     const batchSize = 100
     for (let i = 0; i < ids.length; i += batchSize) {
       const batch = ids.slice(i, i + batchSize)
       try {
-        const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), batch))
+        const whereClause = this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), batch), scope)
 
         if (this.softDeleteColumn) {
           await this.db
             .update(this.table)
-            .set({ [this.softDeleteColumn]: new Date().toISOString() } as any)
+            .set({ [this.softDeleteColumn]: new Date() } as any)
             .where(whereClause)
         } else {
           await this.db.delete(this.table).where(whereClause)

@@ -76,6 +76,49 @@ describe('createSyncApi route structure', () => {
     expect(room.mutate).toHaveBeenCalledWith('todos', 'update', 'tenant', expect.objectContaining({ id: '1', data: { title: 'Updated' } }), undefined, undefined, undefined)
   })
 
+  it('returns 400 instead of invoking mutations when the JSON body is invalid', async () => {
+    const room = createMockRoom()
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema, selectSchema } },
+      vi.fn().mockReturnValue(room)
+    )
+
+    const res = await api.request('/tenant/todos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }, mockEnv)
+
+    expect(res.status).toBe(400)
+    expect(room.mutate).not.toHaveBeenCalled()
+  })
+
+  it('rejects attempts to change tenant, owner, or configured scope fields during updates', async () => {
+    const room = createMockRoom()
+    const getRoom = vi.fn().mockReturnValue(room)
+    const permissiveUpdateSchema = z.object({
+      title: z.string().optional(),
+      ownerId: z.string().optional(),
+      syncId: z.string().optional(),
+      listId: z.string().optional(),
+    })
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema: permissiveUpdateSchema, selectSchema, scopeColumn: 'listId' } },
+      getRoom,
+      { scopeColumn: 'listId' }
+    )
+
+    for (const body of [{ ownerId: 'other' }, { syncId: 'other' }, { listId: 'other' }]) {
+      const res = await api.request('/tenant/todos/1', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }, mockEnv)
+      expect(res.status).toBe(400)
+    }
+    expect(room.mutate).not.toHaveBeenCalled()
+  })
+
   it('DELETE /:syncId/:collection/:id calls mutate delete', async () => {
     const room = createMockRoom()
     const getRoom = vi.fn().mockReturnValue(room)
