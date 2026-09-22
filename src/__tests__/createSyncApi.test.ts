@@ -58,6 +58,26 @@ describe('createSyncApi route structure', () => {
     expect(room.mutate).toHaveBeenCalledWith('todos', 'insert', 'tenant', expect.objectContaining({ title: 'New' }), undefined, undefined, undefined)
   })
 
+  it('injects a configured owner column instead of assuming ownerId', async () => {
+    const room = createMockRoom()
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema, selectSchema, ownerColumn: 'createdBy' } },
+      vi.fn().mockReturnValue(room),
+      { getUserId: () => 'alice' }
+    )
+
+    const res = await api.request('/tenant/todos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New' }),
+    }, mockEnv)
+
+    expect(res.status).toBe(200)
+    expect(room.mutate).toHaveBeenCalledWith(
+      'todos', 'insert', 'tenant', expect.objectContaining({ title: 'New', createdBy: 'alice' }), undefined, undefined, 'alice'
+    )
+  })
+
   it('PUT /:syncId/:collection/:id calls mutate update', async () => {
     const room = createMockRoom()
     const getRoom = vi.fn().mockReturnValue(room)

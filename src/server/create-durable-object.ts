@@ -101,7 +101,8 @@ export function createDurableObject<TConfig extends CollectionsMap>(
             config.softDeleteColumn,
             config.scopeColumn ?? 'scope',
             (config as any).orderByColumn,
-            (config as any).orderDirection
+            (config as any).orderDirection,
+            (config as any).ownerColumn ?? 'ownerId'
           )
         )
       })

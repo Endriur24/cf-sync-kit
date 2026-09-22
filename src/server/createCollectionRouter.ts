@@ -60,6 +60,8 @@ export interface CollectionRouterOptions {
    * Ignored when singleTenant is true.
    */
   syncIdColumn?: string
+  /** Name of the column populated with the authenticated user ID (default: "ownerId"). */
+  ownerColumn?: string
   /**
    * Name of the Drizzle table column used for scope filtering (default: "scope").
    */
@@ -141,6 +143,7 @@ export function createCollectionHandlers(
   const getUserId = options?.getUserId
   const validateSyncAccess = options?.validateSyncAccess
   const syncIdColumn = options?.syncIdColumn ?? 'syncId'
+  const ownerColumn = options?.ownerColumn ?? 'ownerId'
   const scopeColumn = options?.scopeColumn ?? 'scope'
   const singleTenant = options?.singleTenant ?? false
   const dbName = options?.dbName ?? 'DB'
@@ -187,7 +190,7 @@ export function createCollectionHandlers(
   }
 
   const assertNoProtectedFields = (data: Record<string, unknown>) => {
-    const protectedFields = ['id', 'ownerId', syncIdColumn, scopeColumn]
+    const protectedFields = ['id', ownerColumn, syncIdColumn, scopeColumn]
     const field = protectedFields.find((name) => name in data)
     if (field) throw new HTTPException(400, { message: `Field "${field}" cannot be set by the client` })
   }
@@ -260,7 +263,7 @@ export function createCollectionHandlers(
       const payload = {
         ...data,
         ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
-        ...(!singleTenant ? { ownerId: userId } : {}),
+        ...(!singleTenant ? { [ownerColumn]: userId } : {}),
       }
       const result = await room.mutate(collection, 'insert', syncId, payload, _clientMutationId, scope, userId)
       return c.json({ success: true, data: result })
@@ -303,7 +306,7 @@ export function createCollectionHandlers(
         return {
           ...item,
           ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
-          ...(!singleTenant && { ownerId: userId })
+          ...(!singleTenant && { [ownerColumn]: userId })
         }
       })
 

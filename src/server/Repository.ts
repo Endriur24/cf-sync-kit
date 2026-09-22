@@ -23,6 +23,7 @@ type DynamicInsertValue = Record<string, unknown>
 export class Repository<TTable extends AnySQLiteTable> {
   protected db: DrizzleD1Database
   public readonly syncIdColumn: string
+  public readonly ownerColumn: string
   public readonly scopeColumn: string
   public readonly singleTenant: boolean
   public readonly autoTimestamp: boolean
@@ -52,10 +53,12 @@ export class Repository<TTable extends AnySQLiteTable> {
     softDeleteColumn?: string | boolean,
     scopeColumn = 'scope',
     orderByColumn?: string,
-    orderDirection: 'asc' | 'desc' = 'desc'
+    orderDirection: 'asc' | 'desc' = 'desc',
+    ownerColumn = 'ownerId'
   ) {
     this.db = drizzle(d1)
     this.syncIdColumn = syncIdColumn
+    this.ownerColumn = ownerColumn
     this.scopeColumn = scopeColumn
     this.singleTenant = singleTenant
     this.autoTimestamp = autoTimestamp
@@ -79,7 +82,7 @@ export class Repository<TTable extends AnySQLiteTable> {
   }
 
   private assertMutableData(data: Record<string, unknown>) {
-    const protectedFields = ['id', this.syncIdColumn, this.scopeColumn, 'createdAt', this.softDeleteColumn]
+    const protectedFields = ['id', this.syncIdColumn, this.ownerColumn, this.scopeColumn, 'createdAt', this.softDeleteColumn]
       .filter((field): field is string => Boolean(field))
     const field = protectedFields.find((name) => name in data)
     if (field) throw new Error(`[Repository] Field "${field}" cannot be changed after creation`)
