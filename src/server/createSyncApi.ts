@@ -77,7 +77,7 @@ export function createSyncApi(
       message = match[2]
     }
 
-    console.error('[cf-sync-kit] Unhandled Server Error:', err)
+    if (status >= 500) console.error('[cf-sync-kit] Unhandled Server Error:', err)
     return c.json({ error: { message } }, status)
   })
 

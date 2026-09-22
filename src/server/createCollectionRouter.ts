@@ -244,7 +244,7 @@ export function createCollectionHandlers(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error(`[cf-sync-kit] D1 error in GET /${collection}:`, message)
-        throw new HTTPException(500, { message: `Failed to fetch ${collection}: ${message}` })
+        throw new HTTPException(500, { message: `Failed to fetch ${collection}` })
       }
     },
 
