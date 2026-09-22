@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.6] - 2026-09-22
+
+### Fixed
+
+- Made retried single and bulk inserts idempotent by carrying stable client-generated entity IDs through the protocol and returning records already committed inside the same `syncId` boundary.
+- Prevented partially completed bulk-insert retries from generating a second set of entity IDs and duplicate rows.
+
 ## [0.26.5] - 2026-09-22
 
 ### Fixed

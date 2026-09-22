@@ -9,11 +9,15 @@ import { DEFAULT_SYNC_ID } from '../shared/types'
 
 const syncMetaSchema = z.object({
   _clientMutationId: z.string().optional(),
+  _entityId: z.string().optional(),
   scope: z.string().optional(),
 })
 
 const bulkInsertSchema = (itemSchema: z.ZodType) =>
-  syncMetaSchema.extend({ items: z.array(itemSchema).min(1).max(100) })
+  syncMetaSchema.extend({
+    items: z.array(itemSchema).min(1).max(100),
+    _entityIds: z.array(z.string()).min(1).max(100).optional(),
+  })
 
 const bulkUpdateSchema = (itemSchema: z.ZodType) =>
   syncMetaSchema.extend({ items: z.array(z.object({ id: z.string(), data: itemSchema })).min(1).max(100) })
@@ -181,9 +185,10 @@ export function createCollectionHandlers(
   }
 
   const extractMeta = (body: Record<string, unknown>) => {
-    const { _clientMutationId, scope, ...data } = body
+    const { _clientMutationId, _entityId, scope, ...data } = body
     return {
       _clientMutationId: _clientMutationId as string | undefined,
+      _entityId: _entityId as string | undefined,
       scope: scope as string | undefined,
       data,
     }
@@ -254,7 +259,7 @@ export function createCollectionHandlers(
     create: async (c: Context) => {
       const body = await parseJson(c, insertSchema.and(syncMetaSchema))
       const syncId = getSyncIdFromParam(c)
-      const { _clientMutationId, scope, data } = extractMeta(body)
+      const { _clientMutationId, _entityId, scope, data } = extractMeta(body)
       assertNoProtectedFields(data)
       const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
@@ -262,6 +267,7 @@ export function createCollectionHandlers(
       // scope is always preserved for broadcast filtering
       const payload = {
         ...data,
+        ...(_entityId ? { id: _entityId } : {}),
         ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
         ...(!singleTenant ? { [ownerColumn]: userId } : {}),
       }
@@ -295,16 +301,20 @@ export function createCollectionHandlers(
     bulkCreate: async (c: Context) => {
       const body = await parseJson(c, bulkInsertSchema(insertSchema))
       const syncId = getSyncIdFromParam(c)
-      const { _clientMutationId, scope, items } = body
+      const { _clientMutationId, _entityIds, scope, items } = body
+      if (_entityIds && _entityIds.length !== items.length) {
+        throw new HTTPException(400, { message: '_entityIds must contain one ID for every item' })
+      }
       const userId = await ensureAccess(c, syncId)
       const room = getRoom(c.env, syncId)
 
       console.debug(`[cf-sync-kit] bulk-insert "${collection}" for syncId="${syncId}": ${items.length} items`)
 
-      const payload = (items as Record<string, unknown>[]).map(item => {
+      const payload = (items as Record<string, unknown>[]).map((item, index) => {
         assertNoProtectedFields(item)
         return {
           ...item,
+          ...(_entityIds ? { id: _entityIds[index] } : {}),
           ...(scope !== undefined ? { [scopeColumn]: scope } : {}),
           ...(!singleTenant && { [ownerColumn]: userId })
         }

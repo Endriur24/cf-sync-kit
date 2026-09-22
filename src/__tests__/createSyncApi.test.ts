@@ -58,6 +58,25 @@ describe('createSyncApi route structure', () => {
     expect(room.mutate).toHaveBeenCalledWith('todos', 'insert', 'tenant', expect.objectContaining({ title: 'New' }), undefined, undefined, undefined)
   })
 
+  it('injects a protocol entity ID only after validating insert data', async () => {
+    const room = createMockRoom()
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema, selectSchema } },
+      vi.fn().mockReturnValue(room)
+    )
+
+    const res = await api.request('/tenant/todos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New', _clientMutationId: 'mutation-1', _entityId: 'entity-1' }),
+    }, mockEnv)
+
+    expect(res.status).toBe(200)
+    expect(room.mutate).toHaveBeenCalledWith(
+      'todos', 'insert', 'tenant', expect.objectContaining({ title: 'New', id: 'entity-1' }), 'mutation-1', undefined, undefined
+    )
+  })
+
   it('injects a configured owner column instead of assuming ownerId', async () => {
     const room = createMockRoom()
     const api = createSyncApi(
@@ -171,6 +190,31 @@ describe('createSyncApi route structure', () => {
     expect(res.status).toBe(200)
     expect(getRoom).toHaveBeenCalledWith(mockEnv, 'tenant')
     expect(room.mutate).toHaveBeenCalledWith('todos', 'bulk-insert', 'tenant', expect.any(Array), undefined, undefined, undefined)
+  })
+
+  it('maps stable protocol IDs to bulk inserts and rejects a mismatched ID list', async () => {
+    const room = createMockRoom()
+    const api = createSyncApi(
+      { todos: { table: todosTable, insertSchema, updateSchema, selectSchema } },
+      vi.fn().mockReturnValue(room)
+    )
+
+    const valid = await api.request('/tenant/todos/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ title: 'A' }, { title: 'B' }], _entityIds: ['a', 'b'] }),
+    }, mockEnv)
+    expect(valid.status).toBe(200)
+    expect(room.mutate).toHaveBeenCalledWith(
+      'todos', 'bulk-insert', 'tenant', [expect.objectContaining({ id: 'a' }), expect.objectContaining({ id: 'b' })], undefined, undefined, undefined
+    )
+
+    const invalid = await api.request('/tenant/todos/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ title: 'A' }, { title: 'B' }], _entityIds: ['a'] }),
+    }, mockEnv)
+    expect(invalid.status).toBe(400)
   })
 
   it('PUT /:syncId/:collection/bulk calls mutate bulk-update', async () => {

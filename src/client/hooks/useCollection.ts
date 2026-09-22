@@ -321,12 +321,12 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   const add = useMutation<
     { success: boolean; data: Entity },
     SyncError,
-    { data: Insert; _clientMutationId: string },
+    { data: Insert; _clientMutationId: string; _entityId: string },
     MutationContext
   >({
     mutationFn: async (vars) => {
-      const { _clientMutationId, data } = vars
-      const body = { ...data, _clientMutationId, ...(scope !== undefined && { scope }) }
+      const { _clientMutationId, _entityId, data } = vars
+      const body = { ...data, _clientMutationId, _entityId, ...(scope !== undefined && { scope }) }
       return apiFetch<{ success: boolean; data: Entity }>(`/${syncId}/${collection}`, apiPrefix, {
         method: 'POST',
         headers: getHeaders(),
@@ -337,7 +337,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey })
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
-      const optimisticId = (variables.data as any).id ?? crypto.randomUUID()
+      const optimisticId = variables._entityId
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'insert', entityId: optimisticId })
       if (optimisticUpdates) {
         const optimisticEntity = { ...variables.data, id: optimisticId } as unknown as Entity
@@ -460,12 +460,12 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   const addManyMutation = useMutation<
     { success: true; data: Entity[] },
     SyncError,
-    { items: Insert[]; _clientMutationId: string },
+    { items: Insert[]; _clientMutationId: string; _entityIds: string[] },
     MutationContext
   >({
     mutationFn: async (vars) => {
-      const { items, _clientMutationId } = vars
-      const body = { items, _clientMutationId, ...(scope !== undefined && { scope }) }
+      const { items, _clientMutationId, _entityIds } = vars
+      const body = { items, _clientMutationId, _entityIds, ...(scope !== undefined && { scope }) }
       return apiFetch<{ success: true; data: Entity[] }>(`/${syncId}/${collection}/bulk`, apiPrefix, {
         method: 'POST',
         headers: getHeaders(),
@@ -478,7 +478,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
       const previousData = queryClient.getQueryData<Entity[]>(queryKey)
       pendingMutationsRef.current.set(variables._clientMutationId, { action: 'bulk-insert' })
       if (optimisticUpdates) {
-        const optimisticEntities = variables.items.map(item => ({ ...item, id: (item as any).id ?? crypto.randomUUID() })) as unknown as Entity[]
+        const optimisticEntities = variables.items.map((item, index) => ({ ...item, id: variables._entityIds[index] })) as unknown as Entity[]
         queryClient.setQueryData<Entity[]>(queryKey, (old) => [...optimisticEntities, ...(old ?? [])])
         return { previousData, optimisticIds: optimisticEntities.map(e => e.id) }
       }
@@ -590,7 +590,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
 
   const addWithId = wrapMutate(
     add.mutate,
-    (payload: Insert) => ({ data: payload }),
+    (payload: Insert) => ({ data: payload, _entityId: crypto.randomUUID() }),
     (result: { success: boolean; data: Entity }) => result.data,
   )
 
@@ -608,7 +608,7 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
 
   const addMany = wrapMutate(
     addManyMutation.mutate,
-    (payloads: Insert[]) => ({ items: payloads }),
+    (payloads: Insert[]) => ({ items: payloads, _entityIds: payloads.map(() => crypto.randomUUID()) }),
     (result: { success: boolean; data: Entity[] }) => result.data,
   )
 

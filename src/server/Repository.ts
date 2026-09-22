@@ -104,8 +104,16 @@ export class Repository<TTable extends AnySQLiteTable> {
 
     try {
       // Dynamic payload — types are validated by Zod schemas at the router level
-      const results = await this.db.insert(this.table).values(payload as any).returning()
-      return results[0] || null
+      const results = await this.db.insert(this.table).values(payload as any).onConflictDoNothing().returning()
+      if (results[0]) return results[0]
+
+      const existing = await this.db
+        .select()
+        .from(this.table)
+        .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), String(id))))
+        .limit(1)
+      if (existing[0]) return existing[0]
+      throw new Error('Entity ID conflicts with a record outside this sync boundary')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[Repository.create] Failed to create entity in ${this.collectionName}: ${message}`)
@@ -202,12 +210,30 @@ export class Repository<TTable extends AnySQLiteTable> {
       for (let i = 0; i < payloads.length; i += batchSize) {
         const batch = payloads.slice(i, i + batchSize)
         // Dynamic payloads — types are validated by Zod schemas at the router level
-        const results = await this.db
+        const inserted = await this.db
           .insert(this.table)
           .values(batch as unknown as any[])
+          .onConflictDoNothing()
           .returning()
 
-        allResults.push(...results)
+        const byId = new Map(inserted.map((row: any) => [String(row.id), row]))
+        const missingIds = batch
+          .map(item => String(item.id))
+          .filter(id => !byId.has(id))
+
+        if (missingIds.length > 0) {
+          const existing = await this.db
+            .select()
+            .from(this.table)
+            .where(this.buildWhere(syncId, inArray(getTableColumn(this.table, 'id'), missingIds)))
+          for (const row of existing as any[]) byId.set(String(row.id), row)
+        }
+
+        for (const item of batch) {
+          const row = byId.get(String(item.id))
+          if (!row) throw new Error(`Entity ID "${String(item.id)}" conflicts outside this sync boundary`)
+          allResults.push(row)
+        }
       }
       return allResults
     } catch (error) {
