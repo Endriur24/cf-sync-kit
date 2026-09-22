@@ -571,42 +571,57 @@ function useCollectionImpl<Entity extends { id: string }, Insert, Update>(
   })
 
   const wrapMutate = useCallback(
-    <T,>(
+    <T, TResult,>(
       mutate: (vars: any, options?: any) => void,
-      buildVars: (payload: T) => any
-    ) => (payload: T, options?: any) =>
-      mutate({ ...buildVars(payload), _clientMutationId: crypto.randomUUID() }, options),
+      buildVars: (payload: T) => any,
+      selectData: (result: TResult) => unknown
+    ) => (payload: T, callbacks?: MutationCallbacks<any, SyncError, T>) =>
+      mutate(
+        { ...buildVars(payload), _clientMutationId: crypto.randomUUID() },
+        callbacks && {
+          onSuccess: (result: TResult) => callbacks.onSuccess?.(selectData(result), payload),
+          onError: (error: SyncError) => callbacks.onError?.(error, payload),
+          onSettled: (result: TResult | undefined, error: SyncError | null) =>
+            callbacks.onSettled?.(result === undefined ? undefined : selectData(result), error, payload),
+        }
+      ),
     []
   )
 
   const addWithId = wrapMutate(
     add.mutate,
-    (payload: Insert) => ({ data: payload })
+    (payload: Insert) => ({ data: payload }),
+    (result: { success: boolean; data: Entity }) => result.data,
   )
 
   const updateWithId = wrapMutate(
     update.mutate,
-    (vars: { id: string; data: Update }) => vars
+    (vars: { id: string; data: Update }) => vars,
+    (result: { success: boolean; data: Entity }) => result.data,
   )
 
   const removeWithId = wrapMutate(
     remove.mutate,
-    (id: string) => ({ id })
+    (id: string) => ({ id }),
+    () => undefined,
   )
 
   const addMany = wrapMutate(
     addManyMutation.mutate,
-    (payloads: Insert[]) => ({ items: payloads })
+    (payloads: Insert[]) => ({ items: payloads }),
+    (result: { success: boolean; data: Entity[] }) => result.data,
   )
 
   const updateMany = wrapMutate(
     updateManyMutation.mutate,
-    (payloads: { id: string; data: Update }[]) => ({ items: payloads })
+    (payloads: { id: string; data: Update }[]) => ({ items: payloads }),
+    (result: { success: boolean; data: Entity[] }) => result.data,
   )
 
   const removeMany = wrapMutate(
     removeManyMutation.mutate,
-    (ids: string[]) => ({ ids })
+    (ids: string[]) => ({ ids }),
+    () => undefined,
   )
 
   return {
