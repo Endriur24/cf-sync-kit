@@ -4,6 +4,8 @@ import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { CollectionsMap } from '../shared/types'
 import type { Middleware } from './MiddlewareSystem'
 import { requireAuth, requireOwner, createSyncAccessMiddleware, createDefaultSyncAccessValidator } from './middleware'
+import type { DurableObjectConnectionAuthorizer } from './DurableObjectBase'
+import { HTTPException } from 'hono/http-exception'
 
 type DurableObjectPreset = 'per-user' | 'shared'
 
@@ -68,7 +70,7 @@ export interface CreateDurableObjectResult {
  */
 export function createDurableObject<TConfig extends CollectionsMap>(
   collectionsConfig: TConfig,
-  options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset; dbName?: string }
+  options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset; dbName?: string; authorizeConnection?: DurableObjectConnectionAuthorizer }
 ): CreateDurableObjectResult {
   const className = options?.className ?? 'SyncRoom'
   const dbName = options?.dbName ?? 'DB'
@@ -110,6 +112,14 @@ export function createDurableObject<TConfig extends CollectionsMap>(
       options?.middlewareBefore?.forEach(m => this.use(m))
       presetMiddleware.forEach(m => this.use(m))
       options?.middleware?.forEach(m => this.use(m))
+      if (options?.preset === 'per-user') {
+        this.authorizeConnections(({ syncId, userId }) => {
+          if (!userId) throw new HTTPException(401, { message: 'Unauthorized WebSocket connection' })
+          if (userId !== syncId) throw new HTTPException(403, { message: 'Forbidden WebSocket room' })
+        })
+      } else if (options?.authorizeConnection) {
+        this.authorizeConnections(options.authorizeConnection)
+      }
     }
   }
 

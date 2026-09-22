@@ -36,6 +36,9 @@ export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, 
 
     requireOwner(),
   ],
+  authorizeConnection: ({ userId }) => {
+    if (!userId) throw new Error('Unauthorized WebSocket connection')
+  },
 })
 
 export function getRoom(env: Bindings, syncId: string) {

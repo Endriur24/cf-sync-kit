@@ -3,6 +3,7 @@ import { basicAuth } from "hono/basic-auth";
 import { HTTPException } from "hono/http-exception";
 import { renderer } from "./renderer";
 import api from "./api";
+import { createWebSocketHandler } from "cf-sync-kit/server";
 export { ProjectRoom } from "./do";
 
 import { users } from "../config/users";
@@ -45,14 +46,10 @@ const app = new Hono<{ Bindings: Bindings; Variables: { username: string } }>()
   .use("/*", authMiddleware)
   
   .all("/parties/:party/:roomId", async (c) => {
-    const roomId = c.req.param("roomId");
-    const party = c.req.param("party");
-    const id = c.env.PROJECT_ROOM.idFromName(roomId);
-    const room = c.env.PROJECT_ROOM.get(id);
-    const headers = new Headers(c.req.raw.headers);
-    headers.set("x-partykit-namespace", party);
-    headers.set("x-partykit-room", roomId);
-    return room.fetch(new Request(c.req.raw, { headers }));
+    return createWebSocketHandler(c.env.PROJECT_ROOM, {
+      party: 'todos',
+      authorize: () => c.get('username'),
+    })(c.req.raw)
   })
   .route("/api", api)
 

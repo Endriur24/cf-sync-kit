@@ -770,6 +770,23 @@ export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, 
 
 The router layer prevents unauthorized reads. The DO layer provides defense-in-depth for mutations (useful if you have other entry points to the DO).
 
+### 3. WebSocket layer (broadcast reads)
+
+`validateSyncAccess` protects HTTP endpoints only. WebSocket upgrades must be authorized separately, otherwise anyone who knows a `syncId` can subscribe to that room's broadcasts.
+
+```ts
+import { createWebSocketHandler, requireWebSocketUser } from 'cf-sync-kit/server'
+
+app.all('/parties/:party/:roomId', (c) =>
+  createWebSocketHandler(c.env.PROJECT_ROOM, {
+    party: 'todos',
+    authorize: requireWebSocketUser(async () => c.get('userId')),
+  })(c.req.raw)
+)
+```
+
+The handler removes client-supplied internal identity headers, authorizes before invoking the Durable Object, and forwards only the verified identity. The `per-user` Durable Object preset verifies that identity again and requires it to equal the room `syncId`. For intentionally public rooms use `{ public: true }` explicitly.
+
 ### Shared scopes
 
 For shared sync scopes where multiple users access the same syncId, add custom middleware that queries the database to verify record ownership:

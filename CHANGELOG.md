@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.10] - 2026-09-22
+
+### Added
+
+- Added `createWebSocketHandler` with explicit public or authorized modes, edge authorization before Durable Object routing, trusted identity forwarding, and party restrictions.
+- Added real workerd coverage for `DurableObjectBase`, `Repository`, D1 idempotency, middleware short-circuiting, authorized WebSocket upgrades, and broadcast delivery.
+
+### Security
+
+- The `per-user` Durable Object preset now rejects WebSocket connections without a verified user identity or when the identity differs from the room `syncId`.
+- WebSocket routing removes spoofed internal identity headers before applying the application authorizer.
+
 ## [0.26.9] - 2026-09-22
 
 ### Fixed

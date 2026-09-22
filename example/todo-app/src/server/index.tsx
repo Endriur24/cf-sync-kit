@@ -4,20 +4,14 @@ import { createSyncApi } from "cf-sync-kit/server";
 import { collectionsConfig } from "../../shared/schema";
 import { getRoom, ProjectRoom } from "./do";
 import completeAll from "./api/complete-all";
+import { createWebSocketHandler } from "cf-sync-kit/server";
 
 export { ProjectRoom };
 
 const app = new Hono<{ Bindings: Bindings }>()
 
   .all("/parties/:party/:roomId", async (c) => {
-    const roomId = c.req.param("roomId");
-    const party = c.req.param("party");
-    const id = c.env.PROJECT_ROOM.idFromName(roomId);
-    const room = c.env.PROJECT_ROOM.get(id);
-    const headers = new Headers(c.req.raw.headers);
-    headers.set("x-partykit-namespace", party);
-    headers.set("x-partykit-room", roomId);
-    return room.fetch(new Request(c.req.raw, { headers }));
+    return createWebSocketHandler(c.env.PROJECT_ROOM, { public: true })(c.req.raw)
   })
 
   .route("/api/complete-all", completeAll)

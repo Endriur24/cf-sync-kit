@@ -8,6 +8,9 @@ export type { MiddlewareContext, Middleware } from './server/MiddlewareSystem'
 export type { RoomMutator, GetRoomFn, CollectionRouterOptions } from './server/createCollectionRouter'
 export { createSyncApi } from './server/createSyncApi'
 export type { SyncApiOptions } from './server/createSyncApi'
+export { createWebSocketHandler, requireWebSocketUser, TRUSTED_WEBSOCKET_USER_HEADER } from './server/websocket'
+export type { WebSocketHandlerOptions, WebSocketAuthorizer, WebSocketAuthorizationContext } from './server/websocket'
+export type { DurableObjectConnectionAuthorizer, DurableObjectConnectionContext } from './server/DurableObjectBase'
 
 // Middleware Utilities
 export {

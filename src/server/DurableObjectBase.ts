@@ -1,5 +1,5 @@
 import { Server } from 'partyserver'
-import type { Connection } from 'partyserver'
+import type { Connection, ConnectionContext } from 'partyserver'
 import type { ActionType, CollectionName } from '../shared/types'
 import type { WsBroadcastEvent } from '../shared/events'
 import type { Repository } from './Repository'
@@ -8,6 +8,15 @@ import { MiddlewareSystem, type MiddlewareContext } from './MiddlewareSystem'
 import { MutationQueue } from './MutationQueue'
 import { log } from '../shared/logger'
 import { HTTPException } from 'hono/http-exception'
+
+export interface DurableObjectConnectionContext {
+  request: Request
+  syncId: string
+  userId?: string
+  env: Bindings
+}
+
+export type DurableObjectConnectionAuthorizer = (context: DurableObjectConnectionContext) => void | Promise<void>
 
 /**
  * Base class for Durable Objects that handle real-time collection synchronization.
@@ -32,6 +41,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   private connections = new Set<string>()
   private mutationQueue = new MutationQueue()
   private readonly storage: DurableObjectStorage
+  private connectionAuthorizer?: DurableObjectConnectionAuthorizer
 
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env)
@@ -66,11 +76,18 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     return this
   }
 
+  protected authorizeConnections(authorizer: DurableObjectConnectionAuthorizer) {
+    this.connectionAuthorizer = authorizer
+    return this
+  }
+
   /**
    * Called when a client connects via WebSocket.
    * Sends sync-init event with current broadcast counters.
    */
-  async onConnect(connection: Connection) {
+  async onConnect(connection: Connection, context: ConnectionContext) {
+    const userId = context.request.headers.get('x-cf-sync-user-id') ?? undefined
+    await this.connectionAuthorizer?.({ request: context.request, syncId: this.name, userId, env: this.env })
     log.debug('Client connected:', connection.id)
     this.connections.add(connection.id)
 
