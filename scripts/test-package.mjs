@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, readdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,3 +17,27 @@ for (const specifier of specifiers) {
   if (!specifier.endsWith('.js')) throw new Error(`Server entry has an extensionless import: ${specifier}`)
   await access(resolve(dirname(serverPath), specifier))
 }
+
+async function verifySourceMaps(directory) {
+  for (const item of await readdir(directory, { withFileTypes: true })) {
+    const path = resolve(directory, item.name)
+    if (item.isDirectory()) {
+      await verifySourceMaps(path)
+      continue
+    }
+    if (!item.name.endsWith('.map')) continue
+
+    const sourceMap = JSON.parse(await readFile(path, 'utf8'))
+    if (!Array.isArray(sourceMap.sourcesContent)) {
+      throw new Error(`${path} does not embed sourcesContent`)
+    }
+    if (sourceMap.sourcesContent.length !== sourceMap.sources.length) {
+      throw new Error(`${path} has incomplete sourcesContent`)
+    }
+    if (sourceMap.sourcesContent.some(source => typeof source !== 'string' || source.length === 0)) {
+      throw new Error(`${path} contains a missing embedded source`)
+    }
+  }
+}
+
+await verifySourceMaps(fileURLToPath(new URL('../dist', import.meta.url)))

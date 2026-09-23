@@ -1,5 +1,6 @@
 import { rm, readdir, readFile, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -34,3 +35,23 @@ async function addEsmExtensions(directory) {
 }
 
 await addEsmExtensions(dist)
+
+async function embedSourceMapSources(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = `${directory}/${entry.name}`
+    if (entry.isDirectory()) {
+      await embedSourceMapSources(path)
+      continue
+    }
+    if (!entry.name.endsWith('.map')) continue
+
+    const sourceMap = JSON.parse(await readFile(path, 'utf8'))
+    if (Array.isArray(sourceMap.sourcesContent)) continue
+    sourceMap.sourcesContent = await Promise.all(
+      sourceMap.sources.map(source => readFile(resolve(dirname(path), source), 'utf8')),
+    )
+    await writeFile(path, JSON.stringify(sourceMap))
+  }
+}
+
+await embedSourceMapSources(dist)
