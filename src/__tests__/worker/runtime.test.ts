@@ -329,6 +329,141 @@ describe('Workers runtime harness', () => {
     socket.close()
   })
 
+  it('keeps retrying the original event when publication fails more than once', async () => {
+    await prepareSchema()
+    const syncId = 'repeated-broadcast-failure'
+    const response = await SELF.fetch(`https://example.com/parties/main/${syncId}`, {
+      headers: { Upgrade: 'websocket', Authorization: `Bearer ${syncId}` },
+    })
+    const socket = response.webSocket!
+    socket.accept()
+    const messages: string[] = []
+    socket.addEventListener('message', event => { messages.push(String(event.data)) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const room = env.TEST_ROOM.getByName(syncId)
+    const payload = { id: 'eventually-published', title: 'committed once' }
+    await room.setFaults('broadcast', 2)
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(room.mutateCaptured(syncId, payload, 'repeated-broadcast-mutation')).resolves.toMatchObject({
+        ok: false,
+        message: 'Mutation committed; retry with the same mutation ID to recover',
+      })
+    }
+    await expect(room.mutateCaptured(syncId, payload, 'repeated-broadcast-mutation')).resolves.toMatchObject({ ok: true })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const broadcasts = messages
+      .map(message => JSON.parse(message))
+      .filter(message => message.payload?.id === 'eventually-published')
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0].broadcastId).toBe(1)
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM framework_todos WHERE id = ?')
+      .bind('eventually-published').first<{ count: number }>()).toEqual({ count: 1 })
+    socket.close()
+  })
+
+  it('treats retry after receipt expiry as a new idempotent operation', async () => {
+    await prepareSchema()
+    const syncId = 'expired-receipt-tenant'
+    const response = await SELF.fetch(`https://example.com/parties/main/${syncId}`, {
+      headers: { Upgrade: 'websocket', Authorization: `Bearer ${syncId}` },
+    })
+    const socket = response.webSocket!
+    socket.accept()
+    const messages: string[] = []
+    socket.addEventListener('message', event => { messages.push(String(event.data)) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const room = env.TEST_ROOM.getByName(syncId)
+    const payload = { id: 'expired-receipt-row', title: 'stable entity' }
+    await room.mutate('todos', 'insert', syncId, payload, 'expiring-mutation')
+    expect(await room.expireReceipt('expiring-mutation')).toBe(true)
+    await room.mutate('todos', 'insert', syncId, payload, 'expiring-mutation')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const broadcasts = messages
+      .map(message => JSON.parse(message))
+      .filter(message => message.payload?.id === 'expired-receipt-row')
+    expect(broadcasts.map(message => message.broadcastId)).toEqual([1, 2])
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM framework_todos WHERE id = ?')
+      .bind('expired-receipt-row').first<{ count: number }>()).toEqual({ count: 1 })
+    socket.close()
+  })
+
+  it('migrates and eventually prunes a legacy receipt without TTL metadata', async () => {
+    await prepareSchema()
+    const syncId = 'legacy-receipt-tenant'
+    const room = env.TEST_ROOM.getByName(syncId)
+    const payload = { id: 'legacy-receipt-row', title: 'legacy' }
+    const fingerprint = JSON.stringify({ action: 'insert', syncId, scope: undefined, payload })
+
+    await env.DB.prepare(
+      'INSERT INTO framework_todos (id, sync_id, title) VALUES (?, ?, ?)'
+    ).bind(payload.id, syncId, payload.title).run()
+    await room.installLegacyReceipt('legacy-mutation', fingerprint, {
+      ...payload,
+      syncId,
+      scope: null,
+    })
+
+    await expect(room.mutate(
+      'todos', 'insert', syncId, payload, 'legacy-mutation'
+    )).resolves.toMatchObject({ id: payload.id, title: payload.title })
+
+    await room.mutate(
+      'todos', 'insert', syncId,
+      { id: 'post-legacy-1', title: 'first new' },
+      'post-legacy-mutation-1',
+    )
+    expect(await room.hasReceipt('legacy-mutation')).toBe(true)
+
+    await room.mutate(
+      'todos', 'insert', syncId,
+      { id: 'post-legacy-2', title: 'second new' },
+      'post-legacy-mutation-2',
+    )
+    expect(await room.hasReceipt('legacy-mutation')).toBe(false)
+    expect(await room.countReceipts()).toBe(2)
+  })
+
+  it('continues a concurrent mutation queue when the middle write fails', async () => {
+    await prepareSchema()
+    const syncId = 'concurrent-failure-tenant'
+    const response = await SELF.fetch(`https://example.com/parties/main/${syncId}`, {
+      headers: { Upgrade: 'websocket', Authorization: `Bearer ${syncId}` },
+    })
+    const socket = response.webSocket!
+    socket.accept()
+    const messages: string[] = []
+    socket.addEventListener('message', event => { messages.push(String(event.data)) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const room = env.TEST_ROOM.getByName(syncId)
+    await room.setBeforeWriteFaultOnCall(2)
+    const results = await Promise.all([
+      room.mutateCaptured(syncId, { id: 'concurrent-1', title: 'first' }, 'concurrent-mutation-1'),
+      room.mutateCaptured(syncId, { id: 'concurrent-2', title: 'fails' }, 'concurrent-mutation-2'),
+      room.mutateCaptured(syncId, { id: 'concurrent-3', title: 'third' }, 'concurrent-mutation-3'),
+    ])
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(results.map(result => result.ok)).toEqual([true, false, true])
+    expect(results[1]).toMatchObject({ message: 'Injected failure before D1 write' })
+    const broadcasts = messages
+      .map(message => JSON.parse(message))
+      .filter(message => message.type === 'broadcast')
+    expect(broadcasts.map(message => message.broadcastId)).toEqual([1, 3])
+    expect(broadcasts.map(message => message.payload.id)).toEqual(['concurrent-1', 'concurrent-3'])
+
+    const rows = await env.DB.prepare(
+      'SELECT id FROM framework_todos WHERE sync_id = ? ORDER BY id'
+    ).bind(syncId).all<{ id: string }>()
+    expect(rows.results).toEqual([{ id: 'concurrent-1' }, { id: 'concurrent-3' }])
+    socket.close()
+  })
+
   it('caps retained mutation receipts per room', async () => {
     await prepareSchema()
     const room = env.TEST_ROOM.getByName('retention-tenant')

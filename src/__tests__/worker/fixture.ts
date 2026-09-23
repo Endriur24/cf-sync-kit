@@ -58,14 +58,56 @@ const { SyncRoom: GeneratedTestRoom } = createDurableObject(collections, {
 type FaultPoint = 'before-write' | 'receipt' | 'broadcast'
 
 export class TestRoom extends GeneratedTestRoom {
-  private faultOnce?: FaultPoint
+  private faultCounts: Partial<Record<FaultPoint, number>> = {}
+  private beforeWriteCalls = 0
+  private failBeforeWriteOnCall?: number
 
   setFaultOnce(point: FaultPoint) {
-    this.faultOnce = point
+    this.setFaults(point, 1)
+  }
+
+  setFaults(point: FaultPoint, count: number) {
+    this.faultCounts[point] = count
+  }
+
+  setBeforeWriteFaultOnCall(call: number) {
+    this.failBeforeWriteOnCall = call
   }
 
   async countReceipts() {
     return (await this.ctx.storage.list({ prefix: 'mutation_' })).size
+  }
+
+  async expireReceipt(mutationId: string) {
+    const key = `mutation_todos_${encodeURIComponent(mutationId)}`
+    const receipt = await this.ctx.storage.get<MutationReceipt>(key)
+    if (!receipt) return false
+    await this.ctx.storage.put(key, { ...receipt, expiresAt: Date.now() - 1 })
+    return true
+  }
+
+  async installLegacyReceipt(
+    mutationId: string,
+    fingerprint: string,
+    result: unknown,
+  ) {
+    await this.ctx.storage.put(
+      `mutation_todos_${encodeURIComponent(mutationId)}`,
+      { fingerprint, result },
+    )
+  }
+
+  async hasReceipt(mutationId: string) {
+    return (await this.ctx.storage.get(
+      `mutation_todos_${encodeURIComponent(mutationId)}`,
+    )) !== undefined
+  }
+
+  private consumeFault(point: FaultPoint) {
+    const remaining = this.faultCounts[point] ?? 0
+    if (remaining <= 0) return false
+    this.faultCounts[point] = remaining - 1
+    return true
   }
 
   async mutateCaptured(
@@ -120,23 +162,23 @@ export class TestRoom extends GeneratedTestRoom {
 
   protected override async beforeRepositoryMutation(context: MiddlewareContext) {
     await super.beforeRepositoryMutation(context)
-    if (this.faultOnce === 'before-write') {
-      this.faultOnce = undefined
+    this.beforeWriteCalls++
+    const failsOnCall = this.failBeforeWriteOnCall === this.beforeWriteCalls
+    if (failsOnCall) this.failBeforeWriteOnCall = undefined
+    if (failsOnCall || this.consumeFault('before-write')) {
       throw new Error('Injected failure before D1 write')
     }
   }
 
   protected override async persistMutationReceipt(key: string, receipt: MutationReceipt) {
-    if (this.faultOnce === 'receipt') {
-      this.faultOnce = undefined
+    if (this.consumeFault('receipt')) {
       throw new Error('Injected receipt failure')
     }
     await super.persistMutationReceipt(key, receipt)
   }
 
   protected override publishMutationEvent(event: WsBroadcastEvent) {
-    if (this.faultOnce === 'broadcast') {
-      this.faultOnce = undefined
+    if (this.consumeFault('broadcast')) {
       throw new Error('Injected broadcast failure')
     }
     super.publishMutationEvent(event)
