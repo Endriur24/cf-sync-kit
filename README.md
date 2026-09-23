@@ -1196,31 +1196,57 @@ For aggregated metrics in Workers Analytics Engine:
 
 ```ts
 import { env } from 'cloudflare:workers'
-import { configureObservability } from 'cf-sync-kit/server'
+import {
+  configureObservability,
+  createAnalyticsEngineSink,
+} from 'cf-sync-kit/server'
 
 configureObservability({
-  sink: (event) => {
-    env.SYNC_ANALYTICS.writeDataPoint({
-      indexes: [event.syncId ?? 'global'],
-      blobs: [
-        event.event,
-        event.component,
-        event.collection ?? '',
-        event.action ?? '',
-        event.outcome ?? '',
-      ],
-      doubles: [
-        event.durationMs ?? 0,
-        event.queueWaitMs ?? 0,
-        event.broadcastId ?? 0,
-        event.status ?? 0,
-      ],
-    })
-  },
+  sink: createAnalyticsEngineSink(env.SYNC_ANALYTICS),
 })
 ```
 
-The sink is synchronous and best-effort: exceptions are isolated and never fail framework operations. Analytics Engine writes are non-blocking. Do not start network requests inside the sink; use Workers Logs, Analytics Engine, a Tail Worker, or a Queue-backed application adapter instead. If `syncId` or `mutationId` can identify a person or tenant, hash or replace them in your sink before exporting telemetry.
+Configure the binding in `wrangler.jsonc`:
+
+```jsonc
+{
+  "analytics_engine_datasets": [
+    { "binding": "SYNC_ANALYTICS", "dataset": "cf_sync_kit" }
+  ]
+}
+```
+
+The adapter uses a stable schema. `blob1` is the event, `blob2` the component, `blob3` the level, `blob4` the stage, `blob5` the collection, `blob6` the action, and `blob7` the outcome. `double1` is the schema version, followed by duration, queue wait, broadcast ID, and HTTP status in `double2` through `double5`. `syncId` and `mutationId` occupy `blob8` and `blob9`, but are empty by default to avoid exporting identifiers.
+
+Use a non-sensitive sampling key and explicitly transform identifiers only when required:
+
+```ts
+createAnalyticsEngineSink(env.SYNC_ANALYTICS, {
+  index: event => event.syncId ? tenantSamplingKey(event.syncId) : 'global',
+  transformIdentifier: (value, kind) => telemetryIdentifier(value, kind),
+  levels: ['info', 'warn', 'error'],
+})
+```
+
+Both callbacks must be synchronous; prepare hashes or opaque telemetry identifiers in application code. The adapter truncates indexes to Analytics Engine's 96-byte limit and bounds every blob. It also supports `events` and `include` filters for controlling volume. The underlying sink remains best-effort: exceptions are isolated and never fail framework operations, while Analytics Engine writes are non-blocking.
+
+Sampling-aware queries can then power alerts or a Grafana dashboard:
+
+```sql
+-- failures by stage during the last hour
+SELECT blob4 AS stage, SUM(_sample_interval) AS failures
+FROM cf_sync_kit
+WHERE blob3 = 'error' AND timestamp > NOW() - INTERVAL '1' HOUR
+GROUP BY stage ORDER BY failures DESC
+
+-- p95 D1 duration during the last day
+SELECT quantileExactWeighted(0.95)(double2, _sample_interval) AS p95_ms
+FROM cf_sync_kit
+WHERE blob1 = 'mutation.d1.completed'
+  AND timestamp > NOW() - INTERVAL '1' DAY
+```
+
+Do not start network requests inside a custom sink; use Workers Logs, Analytics Engine, a Tail Worker, or a Queue-backed application adapter instead.
 
 Emitted event families include `mutation.queue.started`, `mutation.sequence.reserved`, `mutation.d1.completed`, `mutation.completed`, `mutation.failed`, `mutation.receipt.replayed`, `mutation.broadcast.retry`, `mutation.broadcast.failed`, `sync.gap.detected`, and `sync.gap.recovered`.
 

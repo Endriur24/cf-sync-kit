@@ -16,6 +16,8 @@ export type { CreateDurableObjectOptions } from './server/create-durable-object'
 export type { RequireOwnerOptions } from './server/middleware'
 export { configureObservability } from './shared/observability'
 export type { ObservabilityEvent, ObservabilityEventName, ObservabilityLevel, ObservabilityOptions, ObservabilitySink, ObservabilityStage } from './shared/observability'
+export { createAnalyticsEngineSink, ANALYTICS_ENGINE_OBSERVABILITY_SCHEMA } from './server/analytics-engine-observability'
+export type { AnalyticsEngineDataPoint, AnalyticsEngineDatasetBinding, AnalyticsEngineIdentifierKind, AnalyticsEngineObservabilityOptions } from './server/analytics-engine-observability'
 
 // Middleware Utilities
 export {

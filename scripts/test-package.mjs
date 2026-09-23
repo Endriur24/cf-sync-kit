@@ -9,6 +9,9 @@ if (typeof entry.useCollection !== 'function') {
 }
 const serverPath = fileURLToPath(new URL('../dist/server.js', import.meta.url))
 const serverSource = await readFile(serverPath, 'utf8')
+if (!serverSource.includes('createAnalyticsEngineSink')) {
+  throw new Error('dist/server.js does not expose the Analytics Engine adapter')
+}
 const specifiers = [...serverSource.matchAll(/from\s+['"](\.\.?\/[^'"]+)['"]/g)].map(match => match[1])
 for (const specifier of specifiers) {
   if (!specifier.endsWith('.js')) throw new Error(`Server entry has an extensionless import: ${specifier}`)
