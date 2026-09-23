@@ -83,6 +83,41 @@ export class TestRoom extends GeneratedTestRoom {
     }
   }
 
+  async bulkInsertCaptured(
+    syncId: string,
+    payload: { id: string; title: string; scope?: string }[],
+    mutationId: string,
+  ) {
+    try {
+      return { ok: true as const, result: await this.mutate('todos', 'bulk-insert', syncId, payload, mutationId) }
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  async scopedMutationCaptured(
+    action: 'update' | 'delete',
+    syncId: string,
+    payload: { id: string; data?: { title?: string } },
+    mutationId: string,
+    scope?: string,
+  ) {
+    try {
+      return {
+        ok: true as const,
+        result: await this.mutate('todos', action, syncId, payload, mutationId, scope),
+      }
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
   protected override async beforeRepositoryMutation(context: MiddlewareContext) {
     await super.beforeRepositoryMutation(context)
     if (this.faultOnce === 'before-write') {

@@ -1,4 +1,4 @@
-import { env, SELF } from 'cloudflare:test'
+import { env, evictDurableObject, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { z } from 'zod'
@@ -122,6 +122,162 @@ describe('Workers runtime harness', () => {
     const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM framework_todos WHERE id = ?')
       .bind('receipt-recovery').first<{ count: number }>()
     expect(count?.count).toBe(1)
+  })
+
+  it('retries a partially committed bulk insert without duplicating earlier batches', async () => {
+    await prepareSchema()
+    const syncId = 'bulk-retry-tenant'
+    const room = env.TEST_ROOM.getByName(syncId)
+    const payload = Array.from({ length: 23 }, (_, index) => ({
+      id: index === 22 ? 'cross-tenant-conflict' : `bulk-retry-${index}`,
+      title: `item ${index}`,
+    }))
+
+    await env.DB.prepare(
+      'INSERT INTO framework_todos (id, sync_id, title) VALUES (?, ?, ?)'
+    ).bind('cross-tenant-conflict', 'another-tenant', 'private').run()
+
+    const failed = await room.bulkInsertCaptured(syncId, payload, 'partial-bulk-mutation')
+    expect(failed).toMatchObject({
+      ok: false,
+      message: expect.stringContaining('conflicts outside this sync boundary'),
+    })
+    const afterFailure = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM framework_todos WHERE sync_id = ?'
+    ).bind(syncId).first<{ count: number }>()
+    expect(afterFailure?.count).toBe(22)
+
+    await env.DB.prepare('DELETE FROM framework_todos WHERE id = ?')
+      .bind('cross-tenant-conflict').run()
+
+    const retried = await room.bulkInsertCaptured(syncId, payload, 'partial-bulk-mutation')
+    expect(retried).toMatchObject({ ok: true })
+    if (!retried.ok) throw new Error(retried.message)
+    expect(retried.result).toHaveLength(23)
+
+    const afterRetry = await env.DB.prepare(
+      'SELECT COUNT(*) AS count, COUNT(DISTINCT id) AS distinctCount FROM framework_todos WHERE sync_id = ?'
+    ).bind(syncId).first<{ count: number; distinctCount: number }>()
+    expect(afterRetry).toEqual({ count: 23, distinctCount: 23 })
+  })
+
+  it('rejects reuse of a mutation ID with a different payload', async () => {
+    await prepareSchema()
+    const room = env.TEST_ROOM.getByName('mutation-conflict-tenant')
+
+    await expect(room.mutateCaptured(
+      'mutation-conflict-tenant',
+      { id: 'mutation-conflict-a', title: 'first' },
+      'reused-mutation-id',
+    )).resolves.toMatchObject({ ok: true })
+
+    await expect(room.mutateCaptured(
+      'mutation-conflict-tenant',
+      { id: 'mutation-conflict-b', title: 'different' },
+      'reused-mutation-id',
+    )).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining('Mutation ID was already used with a different request'),
+    })
+
+    const rows = await env.DB.prepare(
+      'SELECT id FROM framework_todos WHERE sync_id = ? ORDER BY id'
+    ).bind('mutation-conflict-tenant').all<{ id: string }>()
+    expect(rows.results).toEqual([{ id: 'mutation-conflict-a' }])
+  })
+
+  it('does not update or delete an entity through a different scope', async () => {
+    await prepareSchema()
+    const syncId = 'scope-isolation-tenant'
+    const room = env.TEST_ROOM.getByName(syncId)
+    await room.mutate(
+      'todos', 'insert', syncId,
+      { id: 'scope-isolated', title: 'original', scope: 'scope-a' },
+      'scope-isolation-insert', 'scope-a',
+    )
+
+    await expect(room.scopedMutationCaptured(
+      'update', syncId,
+      { id: 'scope-isolated', data: { title: 'forbidden update' } },
+      'wrong-scope-update', 'scope-b',
+    )).resolves.toMatchObject({ ok: false, message: expect.stringContaining('[STATUS:404]') })
+
+    await expect(room.scopedMutationCaptured(
+      'delete', syncId,
+      { id: 'scope-isolated' },
+      'wrong-scope-delete', 'scope-b',
+    )).resolves.toMatchObject({ ok: false, message: expect.stringContaining('[STATUS:404]') })
+
+    expect(await env.DB.prepare(
+      'SELECT title, scope FROM framework_todos WHERE id = ?'
+    ).bind('scope-isolated').first()).toEqual({ title: 'original', scope: 'scope-a' })
+  })
+
+  it('does not update or delete an entity through another syncId', async () => {
+    await prepareSchema()
+    const ownerRoom = env.TEST_ROOM.getByName('tenant-owner')
+    const attackerRoom = env.TEST_ROOM.getByName('tenant-attacker')
+    await ownerRoom.mutate(
+      'todos', 'insert', 'tenant-owner',
+      { id: 'tenant-isolated', title: 'private' },
+      'tenant-isolation-insert',
+    )
+
+    await expect(attackerRoom.scopedMutationCaptured(
+      'update', 'tenant-attacker',
+      { id: 'tenant-isolated', data: { title: 'forbidden update' } },
+      'cross-tenant-update',
+    )).resolves.toMatchObject({ ok: false, message: expect.stringContaining('[STATUS:404]') })
+
+    await expect(attackerRoom.scopedMutationCaptured(
+      'delete', 'tenant-attacker',
+      { id: 'tenant-isolated' },
+      'cross-tenant-delete',
+    )).resolves.toMatchObject({ ok: false, message: expect.stringContaining('[STATUS:404]') })
+
+    expect(await env.DB.prepare(
+      'SELECT sync_id AS syncId, title FROM framework_todos WHERE id = ?'
+    ).bind('tenant-isolated').first()).toEqual({ syncId: 'tenant-owner', title: 'private' })
+  })
+
+  it('preserves counters, receipts, and a hibernated WebSocket across DO eviction', async () => {
+    await prepareSchema()
+    const syncId = 'eviction-tenant'
+    const response = await SELF.fetch(`https://example.com/parties/main/${syncId}`, {
+      headers: { Upgrade: 'websocket', Authorization: `Bearer ${syncId}` },
+    })
+    const socket = response.webSocket!
+    socket.accept()
+    const messages: string[] = []
+    socket.addEventListener('message', event => { messages.push(String(event.data)) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const room = env.TEST_ROOM.getByName(syncId)
+    const firstPayload = { id: 'before-eviction', title: 'before' }
+    await room.mutate('todos', 'insert', syncId, firstPayload, 'before-eviction-mutation')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await evictDurableObject(room)
+
+    await room.mutate(
+      'todos', 'insert', syncId,
+      { id: 'after-eviction', title: 'after' },
+      'after-eviction-mutation',
+    )
+    await room.mutate('todos', 'insert', syncId, firstPayload, 'before-eviction-mutation')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const broadcasts = messages
+      .map(message => JSON.parse(message))
+      .filter(message => message.type === 'broadcast')
+    expect(broadcasts.map(message => message.broadcastId)).toEqual([1, 2])
+    expect(broadcasts.map(message => message.payload.id)).toEqual(['before-eviction', 'after-eviction'])
+
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM framework_todos WHERE sync_id = ?'
+    ).bind(syncId).first<{ count: number }>()
+    expect(count?.count).toBe(2)
+    socket.close()
   })
 
   it('republishes the stored event on retry after a broadcast failure', async () => {
