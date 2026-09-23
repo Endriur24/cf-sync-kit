@@ -129,6 +129,13 @@ describe('createSyncApi route structure', () => {
     }, mockEnv)
 
     expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        issues: [expect.objectContaining({ path: ['title'] })],
+      },
+    })
     expect(room.mutate).not.toHaveBeenCalled()
   })
 

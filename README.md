@@ -653,6 +653,8 @@ try {
 }
 ```
 
+Invalid request bodies return HTTP 400 with `code: 'VALIDATION_ERROR'` and structured `issues`. Reusing an entity ID that belongs outside the active `syncId` boundary returns HTTP 409 without returning the conflicting record.
+
 #### consistentReads Option
 
 Enable consistent reads to route GET requests through the Durable Object instead of D1:

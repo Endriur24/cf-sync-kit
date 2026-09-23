@@ -110,16 +110,29 @@ export interface CollectionHandlers {
   bulkDelete: (c: Context) => Promise<Response>
 }
 
+function validationException(error: z.ZodError): HTTPException {
+  const exception = new HTTPException(400, { message: 'Validation failed' })
+  Object.assign(exception, {
+    errorCode: 'VALIDATION_ERROR',
+    issues: error.issues.map(issue => ({
+      code: issue.code,
+      message: issue.message,
+      path: issue.path.map(String),
+    })),
+  })
+  return exception
+}
+
 async function parseJson(c: Context, schema: z.ZodType): Promise<any> {
   const body = await c.req.json().catch(() => undefined)
   const result = await schema.safeParseAsync(body)
-  if (!result.success) throw new HTTPException(400, { message: 'Validation failed' })
+  if (!result.success) throw validationException(result.error)
   return result.data
 }
 
 async function parseQuery(c: Context, schema: z.ZodType): Promise<any> {
   const result = await schema.safeParseAsync(c.req.query())
-  if (!result.success) throw new HTTPException(400, { message: 'Validation failed' })
+  if (!result.success) throw validationException(result.error)
   return result.data
 }
 

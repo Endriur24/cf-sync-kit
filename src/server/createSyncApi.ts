@@ -78,7 +78,15 @@ export function createSyncApi(
     }
 
     if (status >= 500) console.error('[cf-sync-kit] Unhandled Server Error:', err)
-    return c.json({ error: { message } }, status)
+    const errorCode = (err as any).errorCode as string | undefined
+    const issues = (err as any).issues as unknown[] | undefined
+    return c.json({
+      error: {
+        message,
+        ...(errorCode && { code: errorCode }),
+        ...(issues && { issues }),
+      },
+    }, status)
   })
 
   // Build a handler map per collection. createSyncApi owns the global path

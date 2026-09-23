@@ -20,6 +20,10 @@ function getTableColumn(table: AnySQLiteTable, columnName: string): Column {
  */
 type DynamicInsertValue = Record<string, unknown>
 
+class RepositoryConflictError extends Error {
+  readonly status = 409
+}
+
 const D1_MAX_BOUND_PARAMETERS = 100
 
 export function getBulkDeleteBatchSize(options: {
@@ -132,8 +136,9 @@ export class Repository<TTable extends AnySQLiteTable> {
         .where(this.buildWhere(syncId, eq(getTableColumn(this.table, 'id'), String(id))))
         .limit(1)
       if (existing[0]) return existing[0]
-      throw new Error('Entity ID conflicts with a record outside this sync boundary')
+      throw new RepositoryConflictError('Entity ID conflicts with a record outside this sync boundary')
     } catch (error) {
+      if (error instanceof RepositoryConflictError) throw error
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[Repository.create] Failed to create entity in ${this.collectionName}: ${message}`)
     }
@@ -250,12 +255,13 @@ export class Repository<TTable extends AnySQLiteTable> {
 
         for (const item of batch) {
           const row = byId.get(String(item.id))
-          if (!row) throw new Error(`Entity ID "${String(item.id)}" conflicts outside this sync boundary`)
+          if (!row) throw new RepositoryConflictError(`Entity ID "${String(item.id)}" conflicts outside this sync boundary`)
           allResults.push(row)
         }
       }
       return allResults
     } catch (error) {
+      if (error instanceof RepositoryConflictError) throw error
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[Repository.bulkCreate] Failed to create entities: ${message}`)
     }

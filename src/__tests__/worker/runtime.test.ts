@@ -186,6 +186,27 @@ describe('Workers runtime harness', () => {
     expect(rows.results).toEqual([{ id: 'mutation-conflict-a' }])
   })
 
+  it('returns conflict semantics without exposing a cross-tenant entity', async () => {
+    await prepareSchema()
+    await env.DB.prepare(
+      'INSERT INTO framework_todos (id, sync_id, title) VALUES (?, ?, ?)'
+    ).bind('cross-tenant-single-id', 'private-tenant', 'private').run()
+    const room = env.TEST_ROOM.getByName('conflict-attacker')
+
+    await expect(room.mutateCaptured(
+      'conflict-attacker',
+      { id: 'cross-tenant-single-id', title: 'overwrite attempt' },
+      'cross-tenant-single-mutation',
+    )).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining('[STATUS:409]'),
+    })
+
+    expect(await env.DB.prepare(
+      'SELECT sync_id AS syncId, title FROM framework_todos WHERE id = ?'
+    ).bind('cross-tenant-single-id').first()).toEqual({ syncId: 'private-tenant', title: 'private' })
+  })
+
   it('does not update or delete an entity through a different scope', async () => {
     await prepareSchema()
     const syncId = 'scope-isolation-tenant'

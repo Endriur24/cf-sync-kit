@@ -90,7 +90,7 @@ async function apiFetch<T = unknown>(path: string, apiPrefix: string, init?: Req
 
   if (!res.ok) {
     const body = await res.json().catch(() => null) as {
-      error?: { message?: string; details?: unknown; issues?: Array<{ message: string; path: string[] }> }
+      error?: { code?: string; message?: string; details?: unknown; issues?: Array<{ message: string; path: string[] }> }
       message?: string
     } | null
 
@@ -98,7 +98,7 @@ async function apiFetch<T = unknown>(path: string, apiPrefix: string, init?: Req
     const zodMessage = body?.error?.issues?.[0]?.message
     const message = body?.error?.message ?? body?.message ?? zodMessage ?? `API error ${res.status}`
 
-    throw new SyncError(message, 'API_ERROR', res.status, body)
+    throw new SyncError(message, body?.error?.code ?? 'API_ERROR', res.status, body)
   }
   return res.json() as Promise<T>
 }
