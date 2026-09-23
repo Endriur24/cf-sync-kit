@@ -84,13 +84,30 @@ export function createDurableObject<TConfig extends CollectionsMap>(
 ): CreateDurableObjectResult {
   const className = options?.className ?? 'SyncRoom'
   const dbName = options?.dbName ?? 'DB'
+  const ownerColumns = new Map(
+    Object.entries(collectionsConfig).map(([collection, config]) => [
+      collection,
+      config.ownerColumn ?? 'ownerId',
+    ])
+  )
 
   const presetMiddleware: Middleware[] = []
   if (options?.preset === 'per-user') {
+    for (const [collection, config] of Object.entries(collectionsConfig)) {
+      const ownerColumn = ownerColumns.get(collection)!
+      if (!(ownerColumn in (config.table as object))) {
+        throw new Error(
+          `Collection "${collection}" uses the per-user preset but its table does not contain ownerColumn "${ownerColumn}".`
+        )
+      }
+    }
     presetMiddleware.push(
       requireAuth(),
       createSyncAccessMiddleware(createDefaultSyncAccessValidator()),
-      requireOwner({ checkOnUpdateDelete: false })
+      requireOwner({
+        checkOnUpdateDelete: false,
+        ownerColumn: collection => ownerColumns.get(collection) ?? 'ownerId',
+      })
     )
   }
 
@@ -114,7 +131,7 @@ export function createDurableObject<TConfig extends CollectionsMap>(
             config.scopeColumn ?? 'scope',
             (config as any).orderByColumn,
             (config as any).orderDirection,
-            (config as any).ownerColumn ?? 'ownerId'
+            ownerColumns.get(name)!
           )
         )
       })

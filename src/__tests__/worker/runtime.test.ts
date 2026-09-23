@@ -1,10 +1,34 @@
 import { env, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { z } from 'zod'
+import { createDurableObject } from '../../server/create-durable-object'
 
 describe('Workers runtime harness', () => {
   async function prepareSchema() {
     await env.DB.exec(`CREATE TABLE IF NOT EXISTS framework_todos (id TEXT PRIMARY KEY, sync_id TEXT NOT NULL, title TEXT NOT NULL, scope TEXT)`)
   }
+
+  it('fails fast when the per-user ownerColumn is absent from the table', () => {
+    const table = sqliteTable('missing_owner', {
+      id: text('id').primaryKey(),
+      syncId: text('sync_id').notNull(),
+      title: text('title').notNull(),
+    })
+    const schema = z.object({ title: z.string() })
+
+    expect(() => createDurableObject({
+      todos: {
+        table,
+        insertSchema: schema,
+        updateSchema: schema.partial(),
+        selectSchema: schema,
+        ownerColumn: 'createdBy',
+      },
+    }, { preset: 'per-user' })).toThrow(
+      'Collection "todos" uses the per-user preset but its table does not contain ownerColumn "createdBy"'
+    )
+  })
 
   it('executes the real DurableObjectBase and Repository against D1', async () => {
     await prepareSchema()
@@ -137,5 +161,30 @@ describe('Workers runtime harness', () => {
       )
     }
     expect(await room.countReceipts()).toBe(2)
+  })
+
+  it('uses the collection ownerColumn in the per-user preset', async () => {
+    await prepareSchema()
+    await env.DB.exec(`CREATE TABLE IF NOT EXISTS framework_owner_todos (id TEXT PRIMARY KEY, sync_id TEXT NOT NULL, created_by TEXT NOT NULL, title TEXT NOT NULL)`)
+    const room = env.OWNER_ROOM.getByName('owner-user')
+
+    await expect(room.insertCaptured(
+      'owner-user',
+      { id: 'wrong-owner', title: 'blocked', createdBy: 'another-user' },
+      'wrong-owner-mutation',
+      'owner-user',
+    )).resolves.toMatchObject({ ok: false, message: expect.stringContaining('createdBy mismatch') })
+
+    await expect(room.insertCaptured(
+      'owner-user',
+      { id: 'right-owner', title: 'allowed', createdBy: 'owner-user' },
+      'right-owner-mutation',
+      'owner-user',
+    )).resolves.toMatchObject({ ok: true, result: { id: 'right-owner', createdBy: 'owner-user' } })
+
+    expect(await env.DB.prepare('SELECT id FROM framework_owner_todos WHERE id = ?')
+      .bind('wrong-owner').first()).toBeNull()
+    expect(await env.DB.prepare('SELECT created_by AS createdBy FROM framework_owner_todos WHERE id = ?')
+      .bind('right-owner').first()).toEqual({ createdBy: 'owner-user' })
   })
 })

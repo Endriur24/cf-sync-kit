@@ -8,7 +8,7 @@ export default defineConfig({
       miniflare: {
         compatibilityDate: '2026-09-22',
         d1Databases: ['DB'],
-        durableObjects: { TEST_ROOM: 'TestRoom' },
+        durableObjects: { TEST_ROOM: 'TestRoom', OWNER_ROOM: 'OwnerRoom' },
       },
     }),
   ],

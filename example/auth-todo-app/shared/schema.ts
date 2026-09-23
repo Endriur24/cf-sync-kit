@@ -19,6 +19,7 @@ export const collectionsConfig = {
   todos: {
     table: todosTable,
     syncIdColumn: 'owner_id',
+    ownerColumn: 'owner_id',
     insertSchema: createInsertSchema(todosTable).omit({ id: true, createdAt: true, owner_id: true }),
     updateSchema: createInsertSchema(todosTable).omit({ id: true }).partial(),
     selectSchema: createSelectSchema(todosTable),

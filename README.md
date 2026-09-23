@@ -119,7 +119,8 @@ By default, the framework expects a column named `syncId`. Use `syncIdColumn` to
 
 ```ts
 // Per-user model
-syncIdColumn: 'user_id'
+syncIdColumn: 'user_id',
+ownerColumn: 'user_id'
 
 // Per-project model
 syncIdColumn: 'project_id'
@@ -141,7 +142,7 @@ scopeColumn: 'list_id'
 
 #### ownerColumn
 
-If ownership is stored under a name other than `ownerId`, configure `ownerColumn`. The router uses it for server-side ownership injection and protects it from client mutation:
+If ownership is stored under a name other than `ownerId`, configure `ownerColumn`. The router uses it for server-side ownership injection, Repository protects it from client mutation, and the `per-user` Durable Object preset verifies the same field. The preset fails fast if that column is missing from the Drizzle table:
 
 ```ts
 ownerColumn: 'created_by'
@@ -301,7 +302,7 @@ Expired and oldest receipts are pruned during subsequent mutations. Retrying aft
 > | Requirement | Detail |
 > |---|---|
 > | **syncId format** | Must match the authenticated `userId` exactly. If not → **403 Forbidden** on every mutation |
-> | **Table column** | Must have a sync isolation column (e.g. `owner_id`). Set via `syncIdColumn`. If missing → **DB error** on insert |
+> | **Table columns** | Must have the configured `syncIdColumn` and `ownerColumn`. They may point to the same property (e.g. `owner_id`). Missing ownership configuration fails fast during setup |
 > | **Data model** | Each user has isolated data — no sharing between users |
 > | **WebSocket routing** | Use `createWebSocketHandler` with an authorizer that returns the verified user ID. The preset checks that it equals the room `syncId` |
 >
@@ -761,7 +762,7 @@ const syncApi = createSyncApi(collectionsConfig, getRoom, {
 })
 ```
 
-On insert, the router automatically injects `ownerId = userId` into the payload.
+On insert, the router automatically injects the configured `ownerColumn = userId` into the payload.
 
 ### 2. Durable Object Layer (mutations)
 
@@ -787,7 +788,7 @@ export const { SyncRoom: ProjectRoom } = createDurableObject(collectionsConfig, 
 
 | Action | Owner handling |
 |--------|----------------|
-| **Insert** | Backend injects `ownerId = ctx.userId` and `syncIdColumn = syncId` — client cannot override |
+| **Insert** | Backend injects `ownerColumn = ctx.userId` and `syncIdColumn = syncId` — client cannot override |
 | **Update** | Ownership enforced by syncId isolation (`createSyncAccessMiddleware`) |
 | **Delete** | Ownership enforced by syncId isolation (`createSyncAccessMiddleware`) |
 
@@ -853,7 +854,7 @@ createWebSocketHandler(env.PROJECT_ROOM, {
 | Middleware | Purpose |
 |------------|---------|
 | `requireAuth()` | Throws if `ctx.userId` is not set |
-| `requireOwner(options?)` | Ensures `ownerId` in payload matches `ctx.userId` |
+| `requireOwner(options?)` | Ensures the configured ownership field in payload matches `ctx.userId` |
 | `createSyncAccessMiddleware(validate)` | Custom syncId validation |
 | `createDefaultSyncAccessValidator(prefix?)` | Helper for per-user syncId validation (default: exact match) |
 | `createAuthMiddleware(getUserId)` | Auth inside DO (extracts userId from context) |
@@ -864,7 +865,8 @@ createWebSocketHandler(env.PROJECT_ROOM, {
 ```ts
 interface RequireOwnerOptions {
   checkOnUpdateDelete?: boolean  // Check ownership on update/delete (default: false)
-  ownerField?: string            // Name of the owner field (default: 'ownerId')
+  ownerColumn?: string | ((collection: string) => string) // Default: 'ownerId'
+  ownerField?: string            // Deprecated alias retained for compatibility
   ownerCheckQuery?: (ctx) => Promise<boolean>  // Custom async ownership check
 }
 
@@ -882,7 +884,7 @@ requireOwner({
 })
 
 // Custom owner field name
-requireOwner({ ownerField: 'createdBy' })
+requireOwner({ ownerColumn: 'createdBy' })
 ```
 
 ## Advanced Authorization – Granular Collection Access Control

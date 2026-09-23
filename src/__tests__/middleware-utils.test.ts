@@ -120,6 +120,47 @@ describe('requireOwner', () => {
       await middleware(ctx, next)
       expect(next).toHaveBeenCalled()
     })
+
+    it('should resolve a custom owner column for each collection', async () => {
+      const middleware = requireOwner({
+        ownerColumn: collection => collection === 'todos' ? 'createdBy' : 'ownerId',
+      })
+      const next = vi.fn()
+      const ctx = createMockContext({
+        collection: 'todos',
+        action: 'insert',
+        userId: 'user-1',
+        payload: { createdBy: 'user-2', title: 'Test' },
+      })
+
+      await expect(middleware(ctx, next)).rejects.toThrow('createdBy mismatch')
+      expect(next).not.toHaveBeenCalled()
+    })
+
+    it('should reject an empty configured owner value', async () => {
+      const middleware = requireOwner({ ownerColumn: 'createdBy' })
+      const next = vi.fn()
+
+      await expect(middleware(createMockContext({
+        action: 'insert',
+        userId: 'user-1',
+        payload: { createdBy: '', title: 'Test' },
+      }), next)).rejects.toThrow('createdBy mismatch')
+      expect(next).not.toHaveBeenCalled()
+    })
+
+    it('keeps ownerField as a backwards-compatible alias', async () => {
+      const middleware = requireOwner({ ownerField: 'createdBy' })
+      const next = vi.fn()
+      const ctx = createMockContext({
+        action: 'insert',
+        userId: 'user-1',
+        payload: { createdBy: 'user-2', title: 'Test' },
+      })
+
+      await expect(middleware(ctx, next)).rejects.toThrow('createdBy mismatch')
+      expect(next).not.toHaveBeenCalled()
+    })
   })
 
   describe('update', () => {
@@ -235,6 +276,22 @@ describe('requireOwner — bulk operations', () => {
 
       await middleware(ctx, next)
       expect(next).toHaveBeenCalled()
+    })
+
+    it('should reject a mismatch in a collection-specific owner column', async () => {
+      const middleware = requireOwner({ ownerColumn: () => 'createdBy' })
+      const next = vi.fn()
+      const ctx = createMockContext({
+        action: 'bulk-insert',
+        userId: 'user-1',
+        payload: [
+          { createdBy: 'user-1', title: 'OK' },
+          { createdBy: 'user-2', title: 'Bad' },
+        ],
+      })
+
+      await expect(middleware(ctx, next)).rejects.toThrow('createdBy mismatch in bulk-insert')
+      expect(next).not.toHaveBeenCalled()
     })
   })
 

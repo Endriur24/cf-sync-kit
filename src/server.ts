@@ -13,6 +13,7 @@ export type { WebSocketHandlerOptions, WebSocketAuthorizer, WebSocketAuthorizati
 export type { DurableObjectConnectionAuthorizer, DurableObjectConnectionContext } from './server/DurableObjectBase'
 export type { DurableObjectBaseOptions, MutationReceipt, MutationReceiptOptions } from './server/DurableObjectBase'
 export type { CreateDurableObjectOptions } from './server/create-durable-object'
+export type { RequireOwnerOptions } from './server/middleware'
 
 // Middleware Utilities
 export {

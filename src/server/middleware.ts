@@ -138,7 +138,9 @@ export function requireAuth(): Middleware {
 export interface RequireOwnerOptions {
   /** Check ownership on update/delete operations (default: false for per-user models) */
   checkOnUpdateDelete?: boolean
-  /** Name of the owner field in payload (default: 'ownerId') */
+  /** Name of the owner column, or a resolver for collection-specific configuration. */
+  ownerColumn?: string | ((collection: string) => string)
+  /** @deprecated Use ownerColumn instead. */
   ownerField?: string
   /**
    * Custom async function to verify record ownership for update/delete operations.
@@ -170,7 +172,7 @@ export interface RequireOwnerOptions {
  *
  * @param options - Configuration options or ownerField string (for backwards compatibility)
  * @param options.checkOnUpdateDelete - Check ownership on update/delete (default: false)
- * @param options.ownerField - Name of the owner field in payload (default: 'ownerId')
+ * @param options.ownerColumn - Name or collection-specific resolver for the owner column (default: 'ownerId')
  *
  * @example
  * // Per-user model (no update/delete check)
@@ -185,7 +187,7 @@ export function requireOwner(options: RequireOwnerOptions | string = {}): Middle
     ? { ownerField: options }
     : options
 
-  const { checkOnUpdateDelete = false, ownerField = 'ownerId', ownerCheckQuery } = opts
+  const { checkOnUpdateDelete = false, ownerColumn, ownerField, ownerCheckQuery } = opts
 
   return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
     if (!ctx.userId) {
@@ -193,15 +195,18 @@ export function requireOwner(options: RequireOwnerOptions | string = {}): Middle
     }
 
     const { action, payload, userId, collection } = ctx
+    const resolvedOwnerColumn = typeof ownerColumn === 'function'
+      ? ownerColumn(collection)
+      : ownerColumn ?? ownerField ?? 'ownerId'
 
     switch (action) {
       case 'insert': {
-        validateItemOwner(payload as Record<string, unknown>, ownerField, userId, 'insert')
+        validateItemOwner(payload as Record<string, unknown>, resolvedOwnerColumn, userId, 'insert')
         break
       }
       case 'bulk-insert': {
         for (const item of payload as Record<string, unknown>[]) {
-          validateItemOwner(item, ownerField, userId, 'bulk-insert')
+          validateItemOwner(item, resolvedOwnerColumn, userId, 'bulk-insert')
         }
         break
       }
@@ -228,15 +233,15 @@ export function requireOwner(options: RequireOwnerOptions | string = {}): Middle
 
 function validateItemOwner(
   item: Record<string, unknown>,
-  ownerField: string,
+  ownerColumn: string,
   userId: string,
   action: string
 ) {
-  const recordOwner = item[ownerField] as string | undefined
-  if (recordOwner && recordOwner !== userId) {
+  const recordOwner = item[ownerColumn]
+  if (recordOwner !== undefined && recordOwner !== userId) {
     const suffix = action === 'bulk-insert' ? ' in bulk-insert' : ''
     throw new HTTPException(403, {
-      message: `Forbidden: you can only create your own records (ownerId mismatch${suffix})`,
+      message: `Forbidden: you can only create your own records (${ownerColumn} mismatch${suffix})`,
     })
   }
 }

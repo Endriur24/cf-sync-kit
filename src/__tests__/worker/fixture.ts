@@ -13,6 +13,13 @@ const todos = sqliteTable('framework_todos', {
   scope: text('scope'),
 })
 
+const ownerTodos = sqliteTable('framework_owner_todos', {
+  id: text('id').primaryKey(),
+  syncId: text('sync_id').notNull(),
+  createdBy: text('created_by').notNull(),
+  title: text('title').notNull(),
+})
+
 const schema = z.object({ title: z.string(), scope: z.string().optional() })
 const collections = {
   todos: {
@@ -20,6 +27,17 @@ const collections = {
     insertSchema: schema,
     updateSchema: schema.partial(),
     selectSchema: schema.extend({ id: z.string(), syncId: z.string() }),
+    autoTimestamp: false,
+  },
+}
+
+const ownerCollections = {
+  todos: {
+    table: ownerTodos,
+    insertSchema: z.object({ title: z.string() }),
+    updateSchema: z.object({ title: z.string() }).partial(),
+    selectSchema: z.object({ id: z.string(), syncId: z.string(), createdBy: z.string(), title: z.string() }),
+    ownerColumn: 'createdBy',
     autoTimestamp: false,
   },
 }
@@ -90,9 +108,35 @@ export class TestRoom extends GeneratedTestRoom {
   }
 }
 
+const { SyncRoom: GeneratedOwnerRoom } = createDurableObject(ownerCollections, {
+  className: 'OwnerRoom',
+  preset: 'per-user',
+})
+
+export class OwnerRoom extends GeneratedOwnerRoom {
+  async insertCaptured(
+    syncId: string,
+    payload: { id: string; title: string; createdBy: string },
+    mutationId: string,
+    userId: string,
+  ) {
+    try {
+      return {
+        ok: true as const,
+        result: await this.mutate('todos', 'insert', syncId, payload, mutationId, undefined, userId),
+      }
+    } catch (error) {
+      return { ok: false as const, message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+}
+
 async function ensureSchema(env: Cloudflare.Env) {
   await env.DB.prepare(
     'CREATE TABLE IF NOT EXISTS framework_todos (id TEXT PRIMARY KEY, sync_id TEXT NOT NULL, title TEXT NOT NULL, scope TEXT)'
+  ).run()
+  await env.DB.prepare(
+    'CREATE TABLE IF NOT EXISTS framework_owner_todos (id TEXT PRIMARY KEY, sync_id TEXT NOT NULL, created_by TEXT NOT NULL, title TEXT NOT NULL)'
   ).run()
 }
 
