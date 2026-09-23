@@ -33,4 +33,19 @@ describe('DurableObjectBase mutation delivery', () => {
     await first
     await expect(pending).resolves.toBe('done')
   })
+
+  it('calls onStart only when a queued operation actually begins', async () => {
+    const queue = new MutationQueue()
+    let release!: () => void
+    const first = queue.enqueue(() => new Promise<void>((resolve) => { release = resolve }))
+    const onStart = vi.fn()
+    const second = queue.enqueue(async () => 'done', onStart)
+
+    await Promise.resolve()
+    expect(onStart).not.toHaveBeenCalled()
+    release()
+    await first
+    await second
+    expect(onStart).toHaveBeenCalledOnce()
+  })
 })

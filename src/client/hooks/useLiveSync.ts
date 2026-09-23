@@ -9,6 +9,7 @@ import { applyMutationToCache } from "./cacheUpdater"
 import { useConnectionStatus, useLiveSyncRegistry } from "../context/ConnectionContext"
 import { SyncError, DEFAULT_SYNC_ID } from "../../shared/types"
 import { log } from "../../shared/logger"
+import { emitObservabilityEvent } from "../../shared/observability"
 
 /**
  * Configuration options for useLiveSync.
@@ -378,6 +379,16 @@ export function useLiveSync(
         debugLog(
           `Gap in broadcasts for ${message.collection} (expected ${lastId + 1}, got ${message.broadcastId}), refetching`
         )
+        const recoveryStartedAt = Date.now()
+        emitObservabilityEvent({
+          level: 'warn',
+          event: 'sync.gap.detected',
+          component: 'client',
+          collection: message.collection,
+          syncId,
+          broadcastId: message.broadcastId,
+          stage: 'recovery',
+        })
         try {
           await queryClient.refetchQueries({
             predicate: (query) => {
@@ -385,7 +396,29 @@ export function useLiveSync(
               return qCollection === message.collection && qSyncId === syncId
             },
           })
+          emitObservabilityEvent({
+            level: 'info',
+            event: 'sync.gap.recovered',
+            component: 'client',
+            collection: message.collection,
+            syncId,
+            broadcastId: message.broadcastId,
+            durationMs: Date.now() - recoveryStartedAt,
+            outcome: 'success',
+            stage: 'recovery',
+          })
         } catch (e) {
+          emitObservabilityEvent({
+            level: 'error',
+            event: 'sync.gap.recovered',
+            component: 'client',
+            collection: message.collection,
+            syncId,
+            broadcastId: message.broadcastId,
+            durationMs: Date.now() - recoveryStartedAt,
+            outcome: 'failure',
+            stage: 'recovery',
+          })
           reportError(new SyncError('Failed to refetch queries after broadcast gap', 'REFETCH_ERROR', undefined, e))
         }
       } else {

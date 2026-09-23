@@ -5,6 +5,7 @@ import { createWebSocketHandler } from '../../server/websocket'
 import type { MutationReceipt } from '../../server/DurableObjectBase'
 import type { MiddlewareContext } from '../../server/MiddlewareSystem'
 import type { WsBroadcastEvent } from '../../shared/events'
+import { configureObservability, type ObservabilityEvent } from '../../shared/observability'
 
 const todos = sqliteTable('framework_todos', {
   id: text('id').primaryKey(),
@@ -61,6 +62,8 @@ export class TestRoom extends GeneratedTestRoom {
   private faultCounts: Partial<Record<FaultPoint, number>> = {}
   private beforeWriteCalls = 0
   private failBeforeWriteOnCall?: number
+  private observabilityEvents: ObservabilityEvent[] = []
+  private restoreObservability?: () => void
 
   setFaultOnce(point: FaultPoint) {
     this.setFaults(point, 1)
@@ -72,6 +75,23 @@ export class TestRoom extends GeneratedTestRoom {
 
   setBeforeWriteFaultOnCall(call: number) {
     this.failBeforeWriteOnCall = call
+  }
+
+  enableObservabilityCapture() {
+    this.observabilityEvents = []
+    this.restoreObservability?.()
+    this.restoreObservability = configureObservability({
+      sink: event => { this.observabilityEvents.push({ ...event }) },
+    })
+  }
+
+  getObservabilityEvents() {
+    return this.observabilityEvents
+  }
+
+  disableObservabilityCapture() {
+    this.restoreObservability?.()
+    this.restoreObservability = undefined
   }
 
   async countReceipts() {

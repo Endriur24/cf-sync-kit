@@ -1180,6 +1180,50 @@ Bulk operations (`addMany`, `updateMany`, `removeMany`) are batched to stay with
 
 Bulk calls are not atomic across multiple D1 chunks. For operations requiring all-or-nothing semantics across the entire input, implement a domain transaction or dedicated server operation.
 
+## Central Observability
+
+Configure one structured telemetry sink per Worker or browser isolate. Every event includes `schemaVersion: 1`. Framework events never contain mutation payloads or query results; they contain correlation fields such as `collection`, `action`, `syncId`, `mutationId`, `broadcastId`, stage, timings, status, and outcome.
+
+For searchable Cloudflare Workers Logs:
+
+```ts
+import { configureObservability } from 'cf-sync-kit/server'
+
+configureObservability({ console: true })
+```
+
+For aggregated metrics in Workers Analytics Engine:
+
+```ts
+import { env } from 'cloudflare:workers'
+import { configureObservability } from 'cf-sync-kit/server'
+
+configureObservability({
+  sink: (event) => {
+    env.SYNC_ANALYTICS.writeDataPoint({
+      indexes: [event.syncId ?? 'global'],
+      blobs: [
+        event.event,
+        event.component,
+        event.collection ?? '',
+        event.action ?? '',
+        event.outcome ?? '',
+      ],
+      doubles: [
+        event.durationMs ?? 0,
+        event.queueWaitMs ?? 0,
+        event.broadcastId ?? 0,
+        event.status ?? 0,
+      ],
+    })
+  },
+})
+```
+
+The sink is synchronous and best-effort: exceptions are isolated and never fail framework operations. Analytics Engine writes are non-blocking. Do not start network requests inside the sink; use Workers Logs, Analytics Engine, a Tail Worker, or a Queue-backed application adapter instead. If `syncId` or `mutationId` can identify a person or tenant, hash or replace them in your sink before exporting telemetry.
+
+Emitted event families include `mutation.queue.started`, `mutation.sequence.reserved`, `mutation.d1.completed`, `mutation.completed`, `mutation.failed`, `mutation.receipt.replayed`, `mutation.broadcast.retry`, `mutation.broadcast.failed`, `sync.gap.detected`, and `sync.gap.recovered`.
+
 ## Running Tests
 
 ```bash

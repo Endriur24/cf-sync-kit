@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { ConnectionProvider, useConnectionStatus } from '../client/context/ConnectionContext'
 import { useLiveSync } from '../client/hooks/useLiveSync'
+import { configureObservability, type ObservabilityEvent } from '../shared/observability'
 
 // ---------------------------------------------------------------------------
 // Mock for partysocket/react
@@ -125,6 +126,7 @@ describe('useLiveSync integration', () => {
   })
 
   afterEach(() => {
+    configureObservability()
     cleanup()
     vi.useRealTimers()
     vi.restoreAllMocks()
@@ -520,6 +522,8 @@ describe('useLiveSync integration', () => {
   // -----------------------------------------------------------------------
   it('triggers query refetch when a broadcast ID gap is detected', async () => {
     const { Wrapper, queryClient } = createWrapper()
+    const telemetry: ObservabilityEvent[] = []
+    configureObservability({ sink: event => telemetry.push({ ...event }) })
     queryClient.setQueryData(['todos', 'room-1', undefined], [{ id: '1', title: 'item 1' }])
 
     const refetchSpy = vi.spyOn(queryClient, 'refetchQueries')
@@ -549,6 +553,18 @@ describe('useLiveSync integration', () => {
     expect(options?.predicate?.({ queryKey: ['todos', 'room-1', 'scope-a'] } as any)).toBe(true)
     expect(options?.predicate?.({ queryKey: ['notes', 'room-1', undefined] } as any)).toBe(false)
     expect(options?.predicate?.({ queryKey: ['todos', 'room-2', undefined] } as any)).toBe(false)
+    expect(telemetry.map(event => event.event)).toEqual([
+      'sync.gap.detected',
+      'sync.gap.recovered',
+    ])
+    expect(telemetry[1]).toMatchObject({
+      component: 'client',
+      collection: 'todos',
+      syncId: 'room-1',
+      broadcastId: 7,
+      durationMs: expect.any(Number),
+      outcome: 'success',
+    })
   })
 
   // -----------------------------------------------------------------------

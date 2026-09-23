@@ -14,6 +14,8 @@ export type { DurableObjectConnectionAuthorizer, DurableObjectConnectionContext 
 export type { DurableObjectBaseOptions, MutationReceipt, MutationReceiptOptions } from './server/DurableObjectBase'
 export type { CreateDurableObjectOptions } from './server/create-durable-object'
 export type { RequireOwnerOptions } from './server/middleware'
+export { configureObservability } from './shared/observability'
+export type { ObservabilityEvent, ObservabilityEventName, ObservabilityLevel, ObservabilityOptions, ObservabilitySink, ObservabilityStage } from './shared/observability'
 
 // Middleware Utilities
 export {

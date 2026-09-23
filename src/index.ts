@@ -20,6 +20,8 @@ export type {
   ConnectionStatus,
 } from './shared/types'
 export { SyncError, isSyncError, defineCollections, DEFAULT_SYNC_ID } from './shared/types'
+export { configureObservability } from './shared/observability'
+export type { ObservabilityEvent, ObservabilityEventName, ObservabilityLevel, ObservabilityOptions, ObservabilitySink, ObservabilityStage } from './shared/observability'
 
 // Shared Events
 export {

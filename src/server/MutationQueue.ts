@@ -6,8 +6,12 @@
 export class MutationQueue {
   private tail: Promise<void> = Promise.resolve()
 
-  enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(operation, operation)
+  enqueue<T>(operation: () => Promise<T>, onStart?: () => void): Promise<T> {
+    const run = () => {
+      onStart?.()
+      return operation()
+    }
+    const result = this.tail.then(run, run)
     this.tail = result.then(() => undefined, () => undefined)
     return result
   }

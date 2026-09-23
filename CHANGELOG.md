@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.16] - 2026-09-23
+
+### Added
+
+- Added a central `configureObservability()` adapter for structured server and client telemetry.
+- Added payload-free events for mutation queue wait, sequence reservation, D1 duration, completion/failure, receipt replay, broadcast recovery, and client gap recovery.
+- Added optional structured console output suitable for Cloudflare Workers Logs and a synchronous sink compatible with Analytics Engine bindings.
+
 ## [0.26.15] - 2026-09-23
 
 ### Fixed

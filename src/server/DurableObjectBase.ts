@@ -6,6 +6,7 @@ import type { Repository } from './Repository'
 import { BroadcastSystem } from './BroadcastSystem'
 import { MiddlewareSystem, type MiddlewareContext } from './MiddlewareSystem'
 import { MutationQueue } from './MutationQueue'
+import { emitObservabilityEvent } from '../shared/observability'
 import { log } from '../shared/logger'
 import { HTTPException } from 'hono/http-exception'
 
@@ -228,7 +229,21 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     scope?: string,
     userId?: string
   ) {
-    return this.mutationQueue.enqueue(() => this.mutateInOrder(collection, action, syncId, payload, clientMutationId, scope, userId))
+    const enqueuedAt = Date.now()
+    return this.mutationQueue.enqueue(
+      () => this.mutateInOrder(collection, action, syncId, payload, clientMutationId, scope, userId),
+      () => emitObservabilityEvent({
+        level: 'debug',
+        event: 'mutation.queue.started',
+        component: 'durable-object',
+        collection,
+        action,
+        syncId,
+        mutationId: clientMutationId,
+        queueWaitMs: Date.now() - enqueuedAt,
+        stage: 'queue',
+      }),
+    )
   }
 
   private async mutateInOrder(
@@ -240,6 +255,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     scope?: string,
     userId?: string
   ) {
+    const mutationStartedAt = Date.now()
     const repo = this.repositories.get(collection)
     if (!repo) throw new HTTPException(400, { message: `Collection ${collection} not registered` })
 
@@ -251,17 +267,74 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       const receipt = await this.getMutationReceipt(receiptKey)
       if (receipt) {
         if (receipt.fingerprint !== fingerprint) {
+          emitObservabilityEvent({
+            level: 'warn',
+            event: 'mutation.failed',
+            component: 'durable-object',
+            collection,
+            action,
+            syncId,
+            mutationId: clientMutationId,
+            durationMs: Date.now() - mutationStartedAt,
+            status: 409,
+            outcome: 'failure',
+            stage: 'receipt',
+          })
           throw new HTTPException(409, { message: 'Mutation ID was already used with a different request' })
         }
         if (receipt.published === false && receipt.event) {
+          let replayStage: 'broadcast' | 'receipt' = 'broadcast'
           try {
+            emitObservabilityEvent({
+              level: 'warn',
+              event: 'mutation.broadcast.retry',
+              component: 'durable-object',
+              collection,
+              action,
+              syncId,
+              mutationId: clientMutationId,
+              broadcastId: receipt.event.broadcastId,
+              stage: 'broadcast',
+            })
             this.publishMutationEvent(receipt.event)
+            replayStage = 'receipt'
             await this.persistMutationReceipt(receiptKey, { ...receipt, published: true })
           } catch (error) {
-            log.error('Committed mutation could not be republished:', error)
+            emitObservabilityEvent({
+              level: 'error',
+              event: replayStage === 'broadcast' ? 'mutation.broadcast.failed' : 'mutation.failed',
+              component: 'durable-object',
+              collection,
+              action,
+              syncId,
+              mutationId: clientMutationId,
+              broadcastId: receipt.event.broadcastId,
+              status: 503,
+              outcome: 'failure',
+              stage: replayStage,
+            })
+            log.error(
+              replayStage === 'broadcast'
+                ? 'Committed mutation could not be republished:'
+                : 'Republished mutation receipt could not be updated:',
+              error,
+            )
             throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
           }
         }
+        emitObservabilityEvent({
+          level: 'info',
+          event: 'mutation.receipt.replayed',
+          component: 'durable-object',
+          collection,
+          action,
+          syncId,
+          mutationId: clientMutationId,
+          broadcastId: receipt.event?.broadcastId,
+          durationMs: Date.now() - mutationStartedAt,
+          outcome: 'replayed',
+          stage: 'receipt',
+        })
         return receipt.result
       }
     }
@@ -278,14 +351,28 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     let result: unknown
     let broadcastId: number | undefined
     let operationReached = false
+    let failureStage: 'sequence' | 'd1' = 'sequence'
     try {
       await this.middlewareSystem.execute(middlewareCtx, async () => {
         operationReached = true
         // Reserve the sequence before the D1 write. A failed write intentionally leaves
         // a gap, which makes connected clients refetch instead of silently going stale.
         broadcastId = await this.broadcastSystem.getNextId(collection)
+        emitObservabilityEvent({
+          level: 'debug',
+          event: 'mutation.sequence.reserved',
+          component: 'durable-object',
+          collection,
+          action,
+          syncId,
+          mutationId: clientMutationId,
+          broadcastId,
+          stage: 'sequence',
+        })
+        failureStage = 'd1'
         await this.beforeRepositoryMutation(middlewareCtx)
 
+        const d1StartedAt = Date.now()
         switch (action) {
           case 'insert':
             result = await repo.create(syncId, payload as Record<string, unknown>)
@@ -316,14 +403,55 @@ export abstract class DurableObjectBase extends Server<Bindings> {
           default:
             throw new HTTPException(400, { message: `Unknown action: ${action}` })
         }
+        emitObservabilityEvent({
+          level: 'info',
+          event: 'mutation.d1.completed',
+          component: 'durable-object',
+          collection,
+          action,
+          syncId,
+          mutationId: clientMutationId,
+          broadcastId,
+          durationMs: Date.now() - d1StartedAt,
+          outcome: 'success',
+          stage: 'd1',
+        })
       })
     } catch (error) {
       // DO RPC strips the HTTPException prototype, so we encode the status in the message.
       const status = (error as any)?.status
       if (typeof status === 'number' && status >= 400 && status < 500) {
+        emitObservabilityEvent({
+          level: 'warn',
+          event: 'mutation.failed',
+          component: 'durable-object',
+          collection,
+          action,
+          syncId,
+          mutationId: clientMutationId,
+          broadcastId,
+          durationMs: Date.now() - mutationStartedAt,
+          status,
+          outcome: 'failure',
+          stage: failureStage,
+        })
         const message = (error as any).message || 'Forbidden'
         throw new HTTPException(status as any, { message: `[STATUS:${status}] ${message}` })
       }
+      emitObservabilityEvent({
+        level: 'error',
+        event: 'mutation.failed',
+        component: 'durable-object',
+        collection,
+        action,
+        syncId,
+        mutationId: clientMutationId,
+        broadcastId,
+        durationMs: Date.now() - mutationStartedAt,
+        status: 500,
+        outcome: 'failure',
+        stage: failureStage,
+      })
       log.error(`Mutation failed: ${collection}/${action}`, error)
       throw new HTTPException(500, { message: error instanceof Error ? error.message : 'Mutation failed' })
     }
@@ -355,20 +483,67 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       try {
         await this.persistMutationReceipt(receiptKey, receipt)
       } catch (error) {
+        emitObservabilityEvent({
+          level: 'error',
+          event: 'mutation.failed',
+          component: 'durable-object',
+          collection,
+          action,
+          syncId,
+          mutationId: clientMutationId,
+          broadcastId,
+          durationMs: Date.now() - mutationStartedAt,
+          status: 503,
+          outcome: 'failure',
+          stage: 'receipt',
+        })
         log.error('Mutation was committed but its receipt could not be stored:', error)
         throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
       }
     }
 
+    let publishStage: 'broadcast' | 'receipt' = 'broadcast'
     try {
       this.publishMutationEvent(event)
       if (receiptKey && receipt) {
+        publishStage = 'receipt'
         await this.persistMutationReceipt(receiptKey, { ...receipt, published: true })
       }
     } catch (error) {
-      log.error('Mutation was committed but could not be broadcast:', error)
+      emitObservabilityEvent({
+        level: 'error',
+        event: publishStage === 'broadcast' ? 'mutation.broadcast.failed' : 'mutation.failed',
+        component: 'durable-object',
+        collection,
+        action,
+        syncId,
+        mutationId: clientMutationId,
+        broadcastId,
+        status: 503,
+        outcome: 'failure',
+        stage: publishStage,
+      })
+      log.error(
+        publishStage === 'broadcast'
+          ? 'Mutation was committed but could not be broadcast:'
+          : 'Published mutation receipt could not be updated:',
+        error,
+      )
       throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
     }
+
+    emitObservabilityEvent({
+      level: 'info',
+      event: 'mutation.completed',
+      component: 'durable-object',
+      collection,
+      action,
+      syncId,
+      mutationId: clientMutationId,
+      broadcastId,
+      durationMs: Date.now() - mutationStartedAt,
+      outcome: 'success',
+    })
 
     return result
   }

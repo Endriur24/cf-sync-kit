@@ -42,6 +42,58 @@ describe('Workers runtime harness', () => {
     expect(count?.count).toBe(1)
   })
 
+  it('emits structured mutation telemetry without payload data', async () => {
+    await prepareSchema()
+    const syncId = 'observability-tenant'
+    const room = env.TEST_ROOM.getByName(syncId)
+    await room.enableObservabilityCapture()
+
+    await room.mutate(
+      'todos', 'insert', syncId,
+      { id: 'observed-row', title: 'secret payload value' },
+      'observed-mutation',
+    )
+
+    const events = await room.getObservabilityEvents()
+    expect(events.map(event => event.event)).toEqual([
+      'mutation.queue.started',
+      'mutation.sequence.reserved',
+      'mutation.d1.completed',
+      'mutation.completed',
+    ])
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'mutation.completed',
+        component: 'durable-object',
+        collection: 'todos',
+        action: 'insert',
+        syncId,
+        mutationId: 'observed-mutation',
+        broadcastId: 1,
+        durationMs: expect.any(Number),
+        outcome: 'success',
+      }),
+    ]))
+    expect(JSON.stringify(events)).not.toContain('secret payload value')
+
+    await room.setFaultOnce('before-write')
+    await room.mutateCaptured(
+      syncId,
+      { id: 'observed-failure', title: 'another secret' },
+      'observed-failed-mutation',
+    )
+    const failure = (await room.getObservabilityEvents()).at(-1)
+    expect(failure).toMatchObject({
+      event: 'mutation.failed',
+      level: 'error',
+      stage: 'd1',
+      status: 500,
+      outcome: 'failure',
+    })
+    expect(JSON.stringify(failure)).not.toContain('another secret')
+    await room.disableObservabilityCapture()
+  })
+
   it('does not write when real middleware short-circuits the terminal operation', async () => {
     await prepareSchema()
     const room = env.TEST_ROOM.getByName('tenant-a')
