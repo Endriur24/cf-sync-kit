@@ -4,7 +4,7 @@ import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { CollectionsMap } from '../shared/types'
 import type { Middleware } from './MiddlewareSystem'
 import { requireAuth, requireOwner, createSyncAccessMiddleware, createDefaultSyncAccessValidator } from './middleware'
-import type { DurableObjectConnectionAuthorizer } from './DurableObjectBase'
+import type { DurableObjectConnectionAuthorizer, MutationReceiptOptions } from './DurableObjectBase'
 import { HTTPException } from 'hono/http-exception'
 
 type DurableObjectPreset = 'per-user' | 'shared'
@@ -15,6 +15,16 @@ export interface DurableObjectClass {
 
 export interface CreateDurableObjectResult {
   SyncRoom: DurableObjectClass
+}
+
+export interface CreateDurableObjectOptions {
+  className?: string
+  middleware?: Middleware[]
+  middlewareBefore?: Middleware[]
+  preset?: DurableObjectPreset
+  dbName?: string
+  authorizeConnection?: DurableObjectConnectionAuthorizer
+  mutationReceipts?: MutationReceiptOptions
 }
 
 /**
@@ -70,7 +80,7 @@ export interface CreateDurableObjectResult {
  */
 export function createDurableObject<TConfig extends CollectionsMap>(
   collectionsConfig: TConfig,
-  options?: { className?: string; middleware?: Middleware[]; middlewareBefore?: Middleware[]; preset?: DurableObjectPreset; dbName?: string; authorizeConnection?: DurableObjectConnectionAuthorizer }
+  options?: CreateDurableObjectOptions
 ): CreateDurableObjectResult {
   const className = options?.className ?? 'SyncRoom'
   const dbName = options?.dbName ?? 'DB'
@@ -86,7 +96,7 @@ export function createDurableObject<TConfig extends CollectionsMap>(
 
   class SyncRoom extends DurableObjectBase {
     constructor(ctx: DurableObjectState, env: Bindings) {
-      super(ctx, env)
+      super(ctx, env, { mutationReceipts: options?.mutationReceipts })
       Object.entries(collectionsConfig).forEach(([name, config]) => {
         // defineCollections() already validates singleTenant vs syncIdColumn —
         // they are mutually exclusive: singleTenant means no tenant isolation,

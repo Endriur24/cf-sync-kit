@@ -281,6 +281,21 @@ export function getRoom(env: Bindings, syncId: string) {
 }
 ```
 
+Completed mutation receipts make retries with the same `_clientMutationId` idempotent. They are retained for 24 hours, with at most 512 entries per room. Both limits can be adjusted without using the room's Durable Object alarm:
+
+```ts
+export const { SyncRoom: UserRoom } = createDurableObject(collectionsConfig, {
+  className: 'UserRoom',
+  preset: 'per-user',
+  mutationReceipts: {
+    ttlMs: 6 * 60 * 60 * 1000,
+    maxEntries: 1_000,
+  },
+})
+```
+
+Expired and oldest receipts are pruned during subsequent mutations. Retrying after the configured retention window is a new operation, so choose a window longer than the maximum client retry period.
+
 > **⚠️ `preset: 'per-user'` requirements:**
 >
 > | Requirement | Detail |
@@ -681,7 +696,7 @@ socket and refetches its scoped queries before returning to `connected`.
 
 | Export | Description |
 |--------|-------------|
-| `createDurableObject(config, opts)` | **Factory** — creates DO class with auto-registered repos. Supports `preset: 'per-user'` for quick setup |
+| `createDurableObject(config, opts)` | **Factory** — creates DO class with auto-registered repos. Supports `preset: 'per-user'` and bounded `mutationReceipts` retention |
 | `createGetRoomFn(namespace)` | **Factory** — creates typed room resolver |
 | `createWebSocketHandler(namespace, options)` | Routes WebSocket upgrades with an explicit `authorize` callback or `{ public: true }` |
 | `requireWebSocketUser(getUserId)` | Per-user WebSocket authorizer requiring `userId === syncId` |
@@ -1155,7 +1170,7 @@ Bulk operations (`addMany`, `updateMany`, `removeMany`) are batched to stay with
 **Partial failure semantics:**
 - **If batch 1 succeeds but batch 2 fails**: Batch 1 results are committed. For `updateMany`, the failed batch is fully rolled back (D1 transaction). For `addMany`/`removeMany`, the failed batch is not applied.
 - **Client cache**: On failure, the query is invalidated and refetched. A stale snapshot is never restored over concurrently successful mutations.
-- **Retry behavior**: A mutation reuses its `_clientMutationId`. Inserts also reuse stable entity IDs, so retrying a partially completed `addMany` does not create duplicate rows. Durable Object receipts return the original result after a completed mutation.
+- **Retry behavior**: A mutation reuses its `_clientMutationId`. Inserts also reuse stable entity IDs, so retrying a partially completed `addMany` does not create duplicate rows. Durable Object receipts return the original result after a completed mutation; after a broadcast failure, retry republishes the stored event with its original sequence ID. Receipts are bounded by the configured TTL and per-room entry limit.
 
 Bulk calls are not atomic across multiple D1 chunks. For operations requiring all-or-nothing semantics across the entire input, implement a domain transaction or dedicated server operation.
 

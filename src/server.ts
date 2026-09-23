@@ -11,6 +11,8 @@ export type { SyncApiOptions } from './server/createSyncApi'
 export { createWebSocketHandler, requireWebSocketUser, TRUSTED_WEBSOCKET_USER_HEADER } from './server/websocket'
 export type { WebSocketHandlerOptions, WebSocketAuthorizer, WebSocketAuthorizationContext } from './server/websocket'
 export type { DurableObjectConnectionAuthorizer, DurableObjectConnectionContext } from './server/DurableObjectBase'
+export type { DurableObjectBaseOptions, MutationReceipt, MutationReceiptOptions } from './server/DurableObjectBase'
+export type { CreateDurableObjectOptions } from './server/create-durable-object'
 
 // Middleware Utilities
 export {

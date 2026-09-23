@@ -18,6 +18,36 @@ export interface DurableObjectConnectionContext {
 
 export type DurableObjectConnectionAuthorizer = (context: DurableObjectConnectionContext) => void | Promise<void>
 
+export interface MutationReceiptOptions {
+  /** How long a mutation can be replayed idempotently. @default 86400000 (24 hours) */
+  ttlMs?: number
+  /** Maximum receipts retained per Durable Object room. @default 512 */
+  maxEntries?: number
+}
+
+export interface DurableObjectBaseOptions {
+  mutationReceipts?: MutationReceiptOptions
+}
+
+export interface MutationReceipt {
+  fingerprint: string
+  result: unknown
+  createdAt?: number
+  expiresAt?: number
+  published?: boolean
+  event?: WsBroadcastEvent
+}
+
+interface MutationReceiptIndexEntry {
+  key: string
+  createdAt: number
+  expiresAt: number
+}
+
+const RECEIPT_INDEX_KEY = '__mutation_receipt_index'
+const DEFAULT_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000
+const DEFAULT_MAX_RECEIPTS = 512
+
 /**
  * Base class for Durable Objects that handle real-time collection synchronization.
  *
@@ -42,10 +72,20 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   private mutationQueue = new MutationQueue()
   private readonly storage: DurableObjectStorage
   private connectionAuthorizer?: DurableObjectConnectionAuthorizer
+  private readonly receiptTtlMs: number
+  private readonly maxReceipts: number
 
-  constructor(ctx: DurableObjectState, env: Bindings) {
+  constructor(ctx: DurableObjectState, env: Bindings, options?: DurableObjectBaseOptions) {
     super(ctx, env)
     this.storage = ctx.storage
+    this.receiptTtlMs = options?.mutationReceipts?.ttlMs ?? DEFAULT_RECEIPT_TTL_MS
+    this.maxReceipts = options?.mutationReceipts?.maxEntries ?? DEFAULT_MAX_RECEIPTS
+    if (!Number.isFinite(this.receiptTtlMs) || this.receiptTtlMs <= 0) {
+      throw new Error('mutationReceipts.ttlMs must be a positive finite number')
+    }
+    if (!Number.isInteger(this.maxReceipts) || this.maxReceipts <= 0) {
+      throw new Error('mutationReceipts.maxEntries must be a positive integer')
+    }
     // Respond to liveness probes at the edge, including while the object is hibernated.
     // This prevents heartbeat traffic from waking the Durable Object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -79,6 +119,60 @@ export abstract class DurableObjectBase extends Server<Bindings> {
   protected authorizeConnections(authorizer: DurableObjectConnectionAuthorizer) {
     this.connectionAuthorizer = authorizer
     return this
+  }
+
+  /** Test/extension hook executed after sequence reservation and before the D1 write. */
+  protected async beforeRepositoryMutation(_context: MiddlewareContext): Promise<void> {}
+
+  /** Test/extension hook for publishing a mutation event. */
+  protected publishMutationEvent(event: WsBroadcastEvent): void {
+    this.broadcast(JSON.stringify(event))
+  }
+
+  /** Persists a receipt and prunes expired/old entries without consuming the room alarm. */
+  protected async persistMutationReceipt(key: string, receipt: MutationReceipt): Promise<void> {
+    await this.storage.transaction(async transaction => {
+      let index = await transaction.get<MutationReceiptIndexEntry[]>(RECEIPT_INDEX_KEY)
+      if (!index) {
+        const existing = await transaction.list<MutationReceipt>({ prefix: 'mutation_' })
+        index = [...existing.entries()].map(([existingKey, value]) => ({
+          key: existingKey,
+          createdAt: value.createdAt ?? 0,
+          expiresAt: value.expiresAt ?? Number.MAX_SAFE_INTEGER,
+        }))
+      }
+
+      const now = Date.now()
+      const nextEntry: MutationReceiptIndexEntry = {
+        key,
+        createdAt: receipt.createdAt ?? now,
+        expiresAt: receipt.expiresAt ?? now + this.receiptTtlMs,
+      }
+      const retained = index
+        .filter(entry => entry.key !== key && entry.expiresAt > now)
+        .concat(nextEntry)
+        .sort((a, b) => a.createdAt - b.createdAt)
+      const removed = retained.splice(0, Math.max(0, retained.length - this.maxReceipts))
+      const retainedKeys = new Set(retained.map(entry => entry.key))
+      const keysToDelete = index
+        .filter(entry => !retainedKeys.has(entry.key) && entry.key !== key)
+        .map(entry => entry.key)
+        .concat(removed.map(entry => entry.key))
+
+      await transaction.put(key, receipt)
+      await transaction.put(RECEIPT_INDEX_KEY, retained)
+      if (keysToDelete.length > 0) await transaction.delete([...new Set(keysToDelete)])
+    })
+  }
+
+  private async getMutationReceipt(key: string): Promise<MutationReceipt | undefined> {
+    const receipt = await this.storage.get<MutationReceipt>(key)
+    if (!receipt) return undefined
+    if (receipt.expiresAt !== undefined && receipt.expiresAt <= Date.now()) {
+      await this.storage.delete(key)
+      return undefined
+    }
+    return receipt
   }
 
   /**
@@ -154,10 +248,19 @@ export abstract class DurableObjectBase extends Server<Bindings> {
       : undefined
     const fingerprint = JSON.stringify({ action, syncId, scope, payload })
     if (receiptKey) {
-      const receipt = await this.storage.get<{ fingerprint: string; result: unknown }>(receiptKey)
+      const receipt = await this.getMutationReceipt(receiptKey)
       if (receipt) {
         if (receipt.fingerprint !== fingerprint) {
           throw new HTTPException(409, { message: 'Mutation ID was already used with a different request' })
+        }
+        if (receipt.published === false && receipt.event) {
+          try {
+            this.publishMutationEvent(receipt.event)
+            await this.persistMutationReceipt(receiptKey, { ...receipt, published: true })
+          } catch (error) {
+            log.error('Committed mutation could not be republished:', error)
+            throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
+          }
         }
         return receipt.result
       }
@@ -181,6 +284,7 @@ export abstract class DurableObjectBase extends Server<Bindings> {
         // Reserve the sequence before the D1 write. A failed write intentionally leaves
         // a gap, which makes connected clients refetch instead of silently going stale.
         broadcastId = await this.broadcastSystem.getNextId(collection)
+        await this.beforeRepositoryMutation(middlewareCtx)
 
         switch (action) {
           case 'insert':
@@ -228,21 +332,39 @@ export abstract class DurableObjectBase extends Server<Bindings> {
     // there was no database mutation to receipt or broadcast.
     if (!operationReached) return undefined
 
-    if (receiptKey) {
-      await this.storage.put(receiptKey, { fingerprint, result })
+    const event: WsBroadcastEvent = {
+      type: 'broadcast',
+      collection,
+      action,
+      payload: result,
+      broadcastId: broadcastId!,
+      clientMutationId,
+      scope,
+    }
+    const now = Date.now()
+    const receipt: MutationReceipt | undefined = receiptKey ? {
+      fingerprint,
+      result,
+      createdAt: now,
+      expiresAt: now + this.receiptTtlMs,
+      published: false,
+      event,
+    } : undefined
+
+    if (receiptKey && receipt) {
+      try {
+        await this.persistMutationReceipt(receiptKey, receipt)
+      } catch (error) {
+        log.error('Mutation was committed but its receipt could not be stored:', error)
+        throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })
+      }
     }
 
     try {
-      const event: WsBroadcastEvent = {
-        type: 'broadcast',
-        collection,
-        action,
-        payload: result,
-        broadcastId: broadcastId!,
-        clientMutationId,
-        scope,
+      this.publishMutationEvent(event)
+      if (receiptKey && receipt) {
+        await this.persistMutationReceipt(receiptKey, { ...receipt, published: true })
       }
-      this.broadcast(JSON.stringify(event))
     } catch (error) {
       log.error('Mutation was committed but could not be broadcast:', error)
       throw new HTTPException(503, { message: 'Mutation committed; retry with the same mutation ID to recover' })

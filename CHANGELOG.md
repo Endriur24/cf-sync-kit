@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.12] - 2026-09-23
+
+### Added
+
+- Added configurable mutation-receipt retention with a 24-hour TTL and a maximum of 512 receipts per Durable Object room by default.
+- Added real workerd fault-injection coverage for failures before D1 writes, after D1 commits, and during WebSocket publication.
+
+### Fixed
+
+- Retrying a committed mutation after a broadcast failure now republishes its stored event with the original sequence ID instead of returning silently.
+- Mutation receipts are pruned opportunistically without consuming the application's single Durable Object alarm.
+
 ## [0.26.11] - 2026-09-22
 
 ### Documentation
