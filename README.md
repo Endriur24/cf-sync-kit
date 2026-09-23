@@ -666,7 +666,7 @@ You can also enable it per-request by appending `?consistent=true` to the URL. T
 
 ```ts
 interface UseLiveSyncOptions {
-  scope?: string              // Filter broadcasts by scope
+  scope?: string              // Deprecated; cache routing uses each event's scope
   party?: string              // PartyKit party/namespace (default: 'main')
   debug?: boolean             // Enable debug logging
   onError?: (error: Error) => void  // Error callback
@@ -1109,7 +1109,7 @@ Scopes allow multiple logical sub-groups (e.g. todo lists, channels, categories)
 When `scope` is specified in `useCollection(collectionName, syncId, scope)`:
 
 1. **Server-Side D1 SQL Filtering**: Initial `GET` requests append `?scope=...` to query parameters. The server executes a targeted SQL query (`WHERE scope = ?`) in Cloudflare D1, returning only records belonging to that scope — saving D1 Read Units and reducing payload size.
-2. **Client-side broadcast filtering**: WebSocket messages carry the `scope` property. Every socket authorized for the `syncId` can receive the raw event, while hooks ignore events for other scopes to avoid unnecessary cache updates and renders.
+2. **Client cache routing**: WebSocket messages carry the `scope` property. A scoped event updates the matching scoped cache and the unscoped cache for the same collection and `syncId`; unrelated scopes and other rooms remain unchanged. Gap and reconnect recovery refetch all affected caches because sequence counters are shared by the collection.
 
 ```ts
 // Client: each list / subpage fetches only its targeted scope data
@@ -1119,6 +1119,8 @@ useCollection('scopedTodos', undefined, listIdB) // GET /default/scopedTodos?sco
 ```
 
 > **Tip:** When using scopes with foreign keys (e.g. `scope` references `lists.id`), use the raw ID as the scope value — not a prefixed string. This ensures the FK constraint is satisfied. You can customize the column name using `scopeColumn` in collection config.
+
+`useLiveSync(..., { scope })` remains accepted for compatibility but no longer filters room broadcasts. Prefer one room-level `useLiveSync(syncId)` call and pass scope only to `useCollection`. This keeps every mounted scoped and unscoped query coherent while `syncId` remains the isolation boundary.
 
 > **Security:** `scope` is not a privacy or authorization boundary. Separate confidential groups into different `syncId` rooms and authorize both their HTTP requests and WebSocket upgrades.
 

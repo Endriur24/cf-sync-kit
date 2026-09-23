@@ -19,11 +19,17 @@ export function applyMutationToCache(
   optimisticIds?: string[],
   options?: { reorderOnUpdate?: boolean }
 ): void {
-  const targetScope = scope
   const merge = compareUpdatedAt ?? ((existing: any, incoming: any) => ({ ...existing, ...incoming }))
 
-  queryClient.setQueryData<unknown[]>(
-    [collection, syncId, targetScope],
+  queryClient.setQueriesData<unknown[]>(
+    {
+      predicate: (query) => {
+        const [queryCollection, querySyncId, queryScope] = query.queryKey
+        return queryCollection === collection
+          && querySyncId === syncId
+          && (queryScope === undefined || queryScope === scope)
+      },
+    },
     (oldData) => {
       if (!oldData) {
         return undefined

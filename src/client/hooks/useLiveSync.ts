@@ -15,7 +15,7 @@ import { log } from "../../shared/logger"
  * Extends PartySocket options for full WebSocket configurability.
  */
 export interface UseLiveSyncOptions {
-  /** Optional scope for filtering broadcasts */
+  /** @deprecated Broadcasts are synchronized across all cached scopes in the syncId room. */
   scope?: string
   /** PartyKit party/namespace to connect to (defaults to "main") */
   party?: string
@@ -217,15 +217,11 @@ export function useLiveSync(
 
   const handleBroadcast = useCallback(
     (message: WsBroadcastEvent) => {
-      if (scope !== undefined && message.scope !== undefined && message.scope !== scope) {
-        return
-      }
-      // Use message-level scope, fall back to hook-level scope
       applyMutationToCache(
         queryClient,
         message.collection,
         syncId,
-        message.scope ?? scope,
+        message.scope,
         message.action,
         message.payload,
         compareUpdatedAt,
@@ -233,17 +229,17 @@ export function useLiveSync(
         { reorderOnUpdate }
       )
     },
-    [syncId, queryClient, compareUpdatedAt, scope, reorderOnUpdate]
+    [syncId, queryClient, compareUpdatedAt, reorderOnUpdate]
   )
 
   const refetchForRecovery = useCallback(async () => {
     await queryClient.refetchQueries({
       predicate: (query) => {
-        const [_collection, qSyncId, qScope] = query.queryKey as [string, string, string | undefined]
-        return qSyncId === syncId && (!scope || qScope === scope)
+        const [_collection, qSyncId] = query.queryKey as [string, string, string | undefined]
+        return qSyncId === syncId
       },
     })
-  }, [queryClient, syncId, scope])
+  }, [queryClient, syncId])
 
   const finishSync = useCallback(async (
     counters?: Record<string, number>,
@@ -384,7 +380,10 @@ export function useLiveSync(
         )
         try {
           await queryClient.refetchQueries({
-            queryKey: [message.collection, syncId, message.scope],
+            predicate: (query) => {
+              const [qCollection, qSyncId] = query.queryKey
+              return qCollection === message.collection && qSyncId === syncId
+            },
           })
         } catch (e) {
           reportError(new SyncError('Failed to refetch queries after broadcast gap', 'REFETCH_ERROR', undefined, e))

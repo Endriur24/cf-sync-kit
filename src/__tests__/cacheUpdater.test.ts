@@ -63,4 +63,53 @@ describe('applyMutationToCache', () => {
       { id: '3', title: 'Third', completed: false },
     ])
   })
+
+  it('updates the unscoped cache and only the matching scoped cache', () => {
+    const initial = [
+      { id: 'a', title: 'Scope A' },
+      { id: 'b', title: 'Scope B' },
+    ]
+    queryClient.setQueryData(['todos', 'room', undefined], initial)
+    queryClient.setQueryData(['todos', 'room', 'scope-a'], [initial[0]])
+    queryClient.setQueryData(['todos', 'room', 'scope-b'], [initial[1]])
+    queryClient.setQueryData(['todos', 'other-room', undefined], initial)
+
+    applyMutationToCache(
+      queryClient,
+      'todos',
+      'room',
+      'scope-a',
+      'update',
+      { id: 'a', title: 'Updated A' },
+    )
+
+    expect(queryClient.getQueryData(['todos', 'room', undefined])).toEqual([
+      { id: 'a', title: 'Updated A' },
+      initial[1],
+    ])
+    expect(queryClient.getQueryData(['todos', 'room', 'scope-a'])).toEqual([
+      { id: 'a', title: 'Updated A' },
+    ])
+    expect(queryClient.getQueryData(['todos', 'room', 'scope-b'])).toEqual([initial[1]])
+    expect(queryClient.getQueryData(['todos', 'other-room', undefined])).toEqual(initial)
+  })
+
+  it('applies an unscoped mutation only to the unscoped cache', () => {
+    queryClient.setQueryData(['todos', 'room', undefined], [])
+    queryClient.setQueryData(['todos', 'room', 'scope-a'], [])
+
+    applyMutationToCache(
+      queryClient,
+      'todos',
+      'room',
+      undefined,
+      'insert',
+      { id: 'unscoped', title: 'Unscoped' },
+    )
+
+    expect(queryClient.getQueryData(['todos', 'room', undefined])).toEqual([
+      { id: 'unscoped', title: 'Unscoped' },
+    ])
+    expect(queryClient.getQueryData(['todos', 'room', 'scope-a'])).toEqual([])
+  })
 })

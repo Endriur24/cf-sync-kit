@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.13] - 2026-09-23
+
+### Fixed
+
+- Scoped mutation results and broadcasts now update both the matching scoped cache and the unscoped cache for the same collection and `syncId`.
+- Broadcasts for one scope no longer leave another existing matching cache stale merely because `useLiveSync` was initialized with a different legacy scope option.
+- Gap and reconnect recovery now refetch all relevant caches in the room because broadcast sequence counters are collection-wide, not scope-specific.
+
 ## [0.26.12] - 2026-09-23
 
 ### Added

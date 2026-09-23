@@ -485,7 +485,38 @@ describe('useLiveSync integration', () => {
   })
 
   // -----------------------------------------------------------------------
-  // Scenario 9: Broadcast gap detection triggers refetch
+  // Scenario 9: Broadcast updates matching scoped and unscoped caches
+  // -----------------------------------------------------------------------
+  it('updates unscoped and matching scoped caches even when the hook has another scope', async () => {
+    const { Wrapper, queryClient } = createWrapper()
+    queryClient.setQueryData(['todos', 'room-1', undefined], [
+      { id: 'a', title: 'A' },
+      { id: 'b', title: 'B' },
+    ])
+    queryClient.setQueryData(['todos', 'room-1', 'scope-a'], [{ id: 'a', title: 'A' }])
+    queryClient.setQueryData(['todos', 'room-1', 'scope-b'], [{ id: 'b', title: 'B' }])
+
+    renderHook(() => useLiveSync('room-1', { scope: 'scope-a' }), { wrapper: Wrapper })
+    const room = getRoomSocket('room-1')
+
+    await act(async () => {
+      room.handlers.onOpen()
+      await room.handlers.onMessage(syncInitMessage({ todos: 0 }))
+      await room.handlers.onMessage(
+        broadcastMessage('todos', 'update', { id: 'b', title: 'Updated B' }, 1, 'scope-b'),
+      )
+    })
+
+    expect(queryClient.getQueryData(['todos', 'room-1', undefined])).toEqual([
+      { id: 'a', title: 'A' },
+      { id: 'b', title: 'Updated B' },
+    ])
+    expect(queryClient.getQueryData(['todos', 'room-1', 'scope-a'])).toEqual([{ id: 'a', title: 'A' }])
+    expect(queryClient.getQueryData(['todos', 'room-1', 'scope-b'])).toEqual([{ id: 'b', title: 'Updated B' }])
+  })
+
+  // -----------------------------------------------------------------------
+  // Scenario 10: Broadcast gap detection triggers refetch
   // -----------------------------------------------------------------------
   it('triggers query refetch when a broadcast ID gap is detected', async () => {
     const { Wrapper, queryClient } = createWrapper()
@@ -512,9 +543,12 @@ describe('useLiveSync integration', () => {
     })
 
     // Should have triggered refetch for the gap
-    expect(refetchSpy).toHaveBeenCalledWith({
-      queryKey: ['todos', 'room-1', undefined],
-    })
+    const options = refetchSpy.mock.calls[0]?.[0]
+    expect(options).toEqual({ predicate: expect.any(Function) })
+    expect(options?.predicate?.({ queryKey: ['todos', 'room-1', undefined] } as any)).toBe(true)
+    expect(options?.predicate?.({ queryKey: ['todos', 'room-1', 'scope-a'] } as any)).toBe(true)
+    expect(options?.predicate?.({ queryKey: ['notes', 'room-1', undefined] } as any)).toBe(false)
+    expect(options?.predicate?.({ queryKey: ['todos', 'room-2', undefined] } as any)).toBe(false)
   })
 
   // -----------------------------------------------------------------------
@@ -602,10 +636,10 @@ describe('useLiveSync integration', () => {
       resolveSlowRefetch = resolve
     })
 
-    // Mock refetchQueries to pause only during gap refetch (which passes queryKey),
-    // while allowing sync-init recovery refetches (which pass predicate) to resolve immediately.
+    // Pause only for the collection-specific gap predicate. Sync-init recovery
+    // matches every collection in the room and should resolve immediately.
     const refetchSpy = vi.spyOn(queryClient, 'refetchQueries').mockImplementation(async (options: any) => {
-      if (options && 'queryKey' in options) {
+      if (options?.predicate && !options.predicate({ queryKey: ['notes', 'room-1', undefined] })) {
         await slowRefetchPromise
       }
     })
